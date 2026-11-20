@@ -97,7 +97,10 @@
        const squashed = latent.map(Math.tanh);
        const value = critic ? critic.forward(inputs).output[0] : 0;
        return {
-           action: [squashed[0], squashed[1], (squashed[2] + 1) * 0.5],
+           // Nexus keeps spatial thrust continuous and maps control gates to [0, 1].
+        action: squashed.map((value, index) =>
+            index < 2 ? value : (value + 1) * 0.5
+        ),
            latent,
            mean,
            meanOffset: mean.map((value, index) => value - baseMean[index]),
