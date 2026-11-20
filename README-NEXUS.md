@@ -11,6 +11,14 @@ Nexus is the v9 continuation of the Agent Five embodied-agent prototype. The imp
 - `nexus-headless-demo.js` — headless migration/simulation/chat/reward demonstration.
 - `PROMPT.txt` — original implementation specification.
 
+## Run on GitHub Pages
+
+The repository now includes a static browser application at `index.html`. It loads the learning, language, and Nexus runtime scripts directly and provides the live simulation, chat, telemetry, reward/correction controls, evolution toggle, and model import/export.
+
+A Pages deployment workflow is included at `.github/workflows/deploy-pages.yml`. In the repository's **Settings → Pages**, set the build/deployment source to **GitHub Actions**. Pushes to `agent-five-nexus-1.0.0` then trigger deployment. The published URL appears in the workflow's `github-pages` deployment environment.
+
+The app uses browser `localStorage` for persistence. Model data stays in that browser unless explicitly exported. The core simulation does not require a backend or API key.
+
 ## Browser integration
 
 Load the scripts in this order:
