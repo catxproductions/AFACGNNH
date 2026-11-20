@@ -83,7 +83,7 @@
     const $ = id => document.getElementById(id);
     const canvas = $("arena"), ctx = canvas.getContext("2d");
     const trail = [];
-    let agent, running = true, lastSnapshot = null, turn = 0, goals = 0;
+    let agent, running = true, lastSnapshot = null, turn = 0;
     const setFeedback = message => $("feedback").textContent = message;
     function addMessage(message) {
       const node = document.createElement("div");
@@ -131,7 +131,7 @@
       $("episodes").textContent=s.episodes.length;
       $("generation").textContent=s.evolutionaryMode?s.evolutionGeneration:"Off";
       $("population").textContent=s.evolutionaryMode?s.evolutionPopulationSize:"—";
-      $("goals").textContent=goals + (s.evolutionaryMode && s.selectedEvolutionAgent ? " · Evo "+s.selectedEvolutionAgent.goalsCollected : "");
+      $("goals").textContent=s.goalsCollected + (s.evolutionaryMode && s.selectedEvolutionAgent ? " · Evo "+s.selectedEvolutionAgent.goalsCollected : "");
     }
     function loop(){refresh();requestAnimationFrame(loop);}
     function send(text){
@@ -155,7 +155,7 @@
     });
     $("resetBtn").addEventListener("click",()=>{
       if(!confirm("Reset Nexus brain and learning memory in this browser?"))return;
-      agent.reset();trail.length=0;goals=0;setFeedback("Nexus reset.");refresh();
+      agent.reset();trail.length=0;setFeedback("Nexus reset.");refresh();
     });
     $("exportBtn").addEventListener("click",()=>{
       const blob=new Blob([JSON.stringify(agent.exportData(),null,2)],{type:"application/json"});
