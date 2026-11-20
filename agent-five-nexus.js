@@ -686,6 +686,7 @@
                 policyRate: PPO_POLICY_RATE, valueRate: PPO_VALUE_RATE, policyStd: PPO_POLICY_STD
             },
             agent: { ...agent }, velocity: { ...velocity }, goal: { ...goal }, obstacle: { ...obstacle },
+            goalsCollected,
             energy, energyDepleted, energyUsageRate,
             lastInputs: lastInputs ? lastInputs.slice() : null,
             lastOutput: lastOutput ? lastOutput.slice() : null,
@@ -886,6 +887,7 @@
     let evolutionDiversity = 0;
     let previousGenerationDuration = null;
     let trainingExamples = 0;
+    let goalsCollected = 0;
     let trainingRewards = 0;
     let trainingCorrections = 0;
     let wallPenaltyFrames = 0;
@@ -2374,6 +2376,7 @@
             emitEnvironmentEvent("<ENV_GOAL>", "Waypoint reached. Returning to the arena goal objective.");
         }
         if (goalDistanceAfterMovement < agent.radius + GOAL_RADIUS) {
+            goalsCollected++;
             reinforce(true);
             addTransitionReward(singlePPOState, 3.5);
             energy = MAX_ENERGY;
@@ -2533,6 +2536,7 @@
         memories = [];
         episodes = [];
         trainingExamples = 0;
+        goalsCollected = 0;
         trainingRewards = 0;
         trainingCorrections = 0;
         wallPenaltyFrames = 0;
