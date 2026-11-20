@@ -989,7 +989,7 @@
     function initializeLearningWorker() {
         if (typeof createWorker !== "function") return;
         try {
-            learningWorker = createWorker("learning-worker.js?v=20261106-neural-v8");
+            learningWorker = createWorker("learning-worker.js?v=nexus-1.0.0");
             learningWorker.addEventListener("message", handlePPOWorkerMessage);
             learningWorker.addEventListener("error", error => {
                 console.warn("Agent Five learning worker stopped; using the safe main-thread fallback.", error);
