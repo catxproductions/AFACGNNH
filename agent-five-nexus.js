@@ -504,9 +504,12 @@
             if (currentRaw) return normalizeMemoryCollection(JSON.parse(currentRaw));
 
 
-            const legacyRaw = storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V2) || storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V1);
-            if (!legacyRaw) return [];
-            const migrated = normalizeMemoryCollection(JSON.parse(legacyRaw), true);
+            const legacyV2 = storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V2);
+            const legacyV1 = storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V1);
+            if (!legacyV2 && !legacyV1) return [];
+            const migrated = normalizeMemoryCollection(
+                JSON.parse(legacyV2 || legacyV1), !legacyV2
+            );
             storage.setItem(MEMORY_STORAGE_KEY, JSON.stringify(migrated));
             return migrated;
         } catch (error) {
@@ -553,11 +556,12 @@
             }
 
 
-            const legacyRaw = storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V2) || storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V1);
-            if (!legacyRaw) return [];
-            const legacy = JSON.parse(legacyRaw);
+            const legacyV2 = storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V2);
+            const legacyV1 = storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V1);
+            if (!legacyV2 && !legacyV1) return [];
+            const legacy = JSON.parse(legacyV2 || legacyV1);
             const migrated = Array.isArray(legacy) ?
-                legacy.map(item => normalizeEpisode(item, true)).filter(Boolean).slice(-EPISODE_MEMORY_CAPACITY) : [];
+                legacy.map(item => normalizeEpisode(item, !legacyV2)).filter(Boolean).slice(-EPISODE_MEMORY_CAPACITY) : [];
             storage.setItem(EPISODE_STORAGE_KEY, JSON.stringify(migrated));
             return migrated;
         } catch (error) {
