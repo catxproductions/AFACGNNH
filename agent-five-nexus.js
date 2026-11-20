@@ -1246,7 +1246,9 @@
             clamp(dialogue.momentum, 0, 1),
             dialogue.pendingTool ? 1 : 0,
             dialogue.hazardUrgency,
-            clamp(dialogue.missionProgress || (1 - missionDistance / Math.hypot(world.width, world.height)), 0, 1),
+            clamp(dialogue.missionGoalTarget > 1 ?
+                dialogue.missionGoalsCompleted / dialogue.missionGoalTarget :
+                1 - missionDistance / Math.hypot(world.width, world.height), 0, 1),
             dialogue.conversationalEnergy
         ];
     }
@@ -1283,8 +1285,9 @@
     function reinforce(isReward) {
         if (!lastInputs) return;
         const target = lastOutput.map((value, index) => {
-            if (isReward) return index < 2 ? clamp(value * 1.1, -1, 1) : value;
-            return index < 2 ? 0 : Math.min(value, 0);
+            if (index < 2) return isReward ? clamp(value * 1.1, -1, 1) : 0;
+            const policyValue = clamp(value * 2 - 1, -1, 1);
+            return isReward ? policyValue : Math.min(policyValue, 0);
         });
         storeExperience(memories, lastInputs, target,
             isReward ? "goal-reward" : "behavior-correction");
@@ -2244,7 +2247,7 @@
         const previousX = agent.x;
         const previousY = agent.y;
         const activeTarget = dialogue.missionWaypoint || goal;
-        const goalDistanceBefore = distance(goal.x - agent.x, goal.y - agent.y);
+        const goalDistanceBefore = distance(activeTarget.x - agent.x, activeTarget.y - agent.y);
         let additionalEnergyCost = 0;
         lastInputs = observe(agent, activeTarget, obstacle);
         const decision = planAndSampleAction(
@@ -2333,6 +2336,12 @@
 
 
         const goalDistanceAfterMovement = distance(goal.x - agent.x, goal.y - agent.y);
+        const missionDistanceAfterMovement = distance(activeTarget.x - agent.x, activeTarget.y - agent.y);
+        if (dialogue.missionWaypoint &&
+            missionDistanceAfterMovement < agent.radius + GOAL_RADIUS) {
+            dialogue.missionWaypoint = null;
+            emitEnvironmentEvent("<ENV_GOAL>", "Waypoint reached. Returning to the arena goal objective.");
+        }
         if (goalDistanceAfterMovement < agent.radius + GOAL_RADIUS) {
             reinforce(true);
             addTransitionReward(singlePPOState, 3.5);
@@ -2387,7 +2396,7 @@
             emitEnvironmentEvent("<ENV_OBSTACLE>", "Lookahead indicates a nearby obstacle hazard; I am prioritizing clearance.");
         }
         dialogue.momentum *= 0.998;
-        const progressReward = clamp((goalDistanceBefore - goalDistanceAfterMovement) / 90, -0.10, 0.10);
+        const progressReward = clamp((goalDistanceBefore - missionDistanceAfterMovement) / 90, -0.10, 0.10);
         lastTransition.reward = clamp(
             lastTransition.reward + progressReward - (energyBefore - energy) * 0.003,
             -8, 8
@@ -2905,7 +2914,8 @@
         start, stop, sendMessage, getSnapshot: createSnapshot, setPopulationSize, setEvolutionMode, setAgentRadius,
         reward: () => {
             reinforce(true);
-            if (lastInputs && lastOutput) storeExperience(memories, lastInputs, lastOutput, "chat-helpful");
+            if (lastInputs && lastOutput) storeExperience(memories, lastInputs,
+                lastOutput.map((value, index) => index < 2 ? value : value * 2 - 1), "chat-helpful");
             addTransitionReward(singlePPOState, 1.5);
             saveMemory(); saveBrain();
         },
