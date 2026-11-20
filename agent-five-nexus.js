@@ -580,7 +580,9 @@
             target: [
                 clamp(item.action[0], -1, 1),
                 clamp(item.action[1], -1, 1),
-                clamp(item.action[2] * 2 - 1, -1, 1)
+                clamp(item.action[2] * 2 - 1, -1, 1),
+                clamp((item.action[3] ?? 0.5) * 2 - 1, -1, 1),
+                clamp((item.action[4] ?? 0.5) * 2 - 1, -1, 1)
             ],
             reward: clamp(item.reward, -8, 8)
         }));
@@ -853,7 +855,7 @@
     let ppoRequestId = 0;
     let learningWorker = null;
     let lastTransition = null;
-    let lastPlannedMean = [0, 0, 0];
+    let lastPlannedMean = [0, 0, 0, 0, 0];
     let simulationAccumulator = 0;
     let simulationClock = 0;
     let evolutionMutationRate = EVOLUTION_MUTATION_RATE;
@@ -874,7 +876,7 @@
     let goal = { x: 395, y: 100 };
     let obstacle = { x: 245, y: 250 };
     let lastInputs = null;
-    let lastOutput = [0, 0, 0];
+    let lastOutput = [0, 0, 0, 0, 0];
     let lastMemoryRecall = 0;
     let lastMemoryRecallCount = 0;
     let saveCountdown = 0;
@@ -885,6 +887,12 @@
     let energy = MAX_ENERGY;
     let energyUsageRate = 0;
     let energyDepleted = false;
+    const dialogue = {
+        activeDirective: false, intentX: 0, intentY: 0, momentum: 0,
+        pendingTool: false, hazardUrgency: 0, missionProgress: 0,
+        conversationalEnergy: 1, wait: false, missionWaypoint: null,
+        turn: 0, lastUserText: "", lastAssistantText: ""
+    };
     let lastFrameTimestamp = null;
     let running = false;
     let frameHandle = null;
@@ -1197,11 +1205,28 @@
         const normalizedEnergyUsageRate = clamp(currentEnergyUsageRate, 0, 1);
 
 
+        const waypoint = dialogue.missionWaypoint;
+        const missionDistance = waypoint ?
+            distance(waypoint.x - position.x, waypoint.y - position.y) :
+            distance(target.x - position.x, target.y - position.y);
+        dialogue.hazardUrgency = clamp(
+            (AVOIDANCE_RANGE - gap) / AVOIDANCE_RANGE + Math.hypot(currentVelocity.x, currentVelocity.y) / SPEED * 0.25,
+            0, 1
+        );
+        dialogue.conversationalEnergy = energyLeft;
         return [
             currentSpeedX, currentSpeedY, goalDx, goalDy, obstacleDx, obstacleDy,
             clearance, currentLocationX, currentLocationY, energyLeft,
             leftClearance, rightClearance, topClearance, bottomClearance,
-            goalDistance, normalizedEnergyUsageRate
+            goalDistance, normalizedEnergyUsageRate,
+            dialogue.activeDirective ? 1 : 0,
+            clamp(dialogue.intentX, -1, 1),
+            clamp(dialogue.intentY, -1, 1),
+            clamp(dialogue.momentum, 0, 1),
+            dialogue.pendingTool ? 1 : 0,
+            dialogue.hazardUrgency,
+            clamp(dialogue.missionProgress || (1 - missionDistance / Math.hypot(world.width, world.height)), 0, 1),
+            dialogue.conversationalEnergy
         ];
     }
 
@@ -2195,12 +2220,13 @@
 
         const previousX = agent.x;
         const previousY = agent.y;
+        const activeTarget = dialogue.missionWaypoint || goal;
         const goalDistanceBefore = distance(goal.x - agent.x, goal.y - agent.y);
         let additionalEnergyCost = 0;
-        lastInputs = observe(agent, goal, obstacle);
+        lastInputs = observe(agent, activeTarget, obstacle);
         const decision = planAndSampleAction(
             brain, critic, lastInputs, agent, velocity,
-            { goal, obstacle }, energy, memories, episodes
+            { goal: activeTarget, obstacle }, energy, memories, episodes
         );
         lastOutput = decision.action;
         lastMemoryRecall = decision.memoryRecall.strength;
@@ -2520,6 +2546,191 @@
     }
 
 
+    function safeCalculate(expression) {
+        const source = String(expression || "").replace(/\s+/g, "");
+        if (!source || source.length > 120 || !/^[0-9.+\-*/()%]+$/.test(source)) {
+            throw new Error("Only basic arithmetic expressions are supported.");
+        }
+        const tokens = source.match(/\d+(?:\.\d+)?|[()+\-*/%]/g) || [];
+        if (tokens.join("") !== source) throw new Error("Invalid arithmetic expression.");
+        let cursor = 0;
+        function primary() {
+            const token = tokens[cursor++];
+            if (token === "+") return primary();
+            if (token === "-") return -primary();
+            if (token === "(") {
+                const value = sum();
+                if (tokens[cursor++] !== ")") throw new Error("Missing closing parenthesis.");
+                return value;
+            }
+            const value = Number(token);
+            if (!Number.isFinite(value)) throw new Error("Invalid number.");
+            return value;
+        }
+        function product() {
+            let value = primary();
+            while (["*", "/", "%"].includes(tokens[cursor])) {
+                const op = tokens[cursor++], rhs = primary();
+                if ((op === "/" || op === "%") && rhs === 0) throw new Error("Division by zero.");
+                value = op === "*" ? value * rhs : op === "/" ? value / rhs : value % rhs;
+            }
+            return value;
+        }
+        function sum() {
+            let value = product();
+            while (tokens[cursor] === "+" || tokens[cursor] === "-") {
+                const op = tokens[cursor++], rhs = product();
+                value = op === "+" ? value + rhs : value - rhs;
+            }
+            return value;
+        }
+        const result = sum();
+        if (cursor !== tokens.length || !Number.isFinite(result)) throw new Error("Invalid arithmetic expression.");
+        return result;
+    }
+
+    function inspect_environment() {
+        const radius = agent.radius || DEFAULT_AGENT_RADIUS;
+        const obstacleDistance = distance(obstacle.x - agent.x, obstacle.y - agent.y);
+        return {
+            position: { x: Number(agent.x.toFixed(2)), y: Number(agent.y.toFixed(2)) },
+            goal: { x: goal.x, y: goal.y }, obstacle: { x: obstacle.x, y: obstacle.y },
+            velocity: { x: Number(velocity.x.toFixed(3)), y: Number(velocity.y.toFixed(3)) },
+            clearances: {
+                left: Number((agent.x - radius).toFixed(2)),
+                right: Number((world.width - radius - agent.x).toFixed(2)),
+                top: Number((agent.y - radius).toFixed(2)),
+                bottom: Number((world.height - radius - agent.y).toFixed(2)),
+                obstacle: Number((obstacleDistance - OBSTACLE_RADIUS - radius).toFixed(2))
+            },
+            energy: Number(energy.toFixed(2)), energyUsageRate: Number(energyUsageRate.toFixed(4))
+        };
+    }
+
+    function set_waypoint(x, y) {
+        const nextX = Number(x), nextY = Number(y);
+        if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) throw new Error("Waypoint coordinates must be finite numbers.");
+        dialogue.missionWaypoint = {
+            x: clamp(nextX, agent.radius, world.width - agent.radius),
+            y: clamp(nextY, agent.radius, world.height - agent.radius)
+        };
+        dialogue.activeDirective = true;
+        dialogue.intentX = 1;
+        dialogue.intentY = 0;
+        return { waypoint: { ...dialogue.missionWaypoint } };
+    }
+
+    function estimate_path_risk() {
+        const inputs = lastInputs || observe(agent, dialogue.missionWaypoint || goal, obstacle);
+        const result = brain.forward(inputs);
+        const planned = learning.planAction(result.output, {
+            x: agent.x, y: agent.y, velocity, goal: dialogue.missionWaypoint || goal, obstacle
+        }, {
+            width: world.width, height: world.height, speed: SPEED,
+            acceleration: ACCELERATION, brakingStrength: BRAKING_STRENGTH,
+            agentRadius: agent.radius, obstacleRadius: OBSTACLE_RADIUS,
+            avoidanceRange: AVOIDANCE_RANGE, horizon: 12, blend: 0.24
+        });
+        const gap = distance(obstacle.x - agent.x, obstacle.y - agent.y) - OBSTACLE_RADIUS - agent.radius;
+        const risk = clamp((AVOIDANCE_RANGE - gap) / AVOIDANCE_RANGE, 0, 1) *
+            (0.5 + 0.5 * Math.hypot(planned[0], planned[1]));
+        return { risk: Number(risk.toFixed(3)), plannedAction: planned.slice(0, 3), obstacleGap: Number(gap.toFixed(2)) };
+    }
+
+    function query_memory(outcomeType) {
+        const matches = memories.filter(item => !outcomeType || item.outcome === outcomeType)
+            .slice(-12).map(item => ({
+                outcome: item.outcome, priority: item.priority,
+                ageMs: Math.max(0, Date.now() - item.createdAt),
+                inputs: item.inputs.slice(), target: item.target.slice()
+            }));
+        return { count: matches.length, matches };
+    }
+
+    function emitChat(sender, textValue, extra = {}) {
+        const message = {
+            model: MODEL_NAME, sender, text: String(textValue),
+            tokens: String(textValue).split(/\s+/).filter(Boolean),
+            toolCalls: extra.toolCalls || [], telemetry: extra.telemetry || inspect_environment()
+        };
+        if (typeof ui.onChatMessage === "function") ui.onChatMessage(message);
+        if (sender === "agent") {
+            dialogue.lastAssistantText = message.text;
+            if (typeof ui.onTokenStream === "function") {
+                for (const token of message.tokens) ui.onTokenStream(token + " ");
+            }
+        }
+        return message;
+    }
+
+    function sendMessage(userText) {
+        const textValue = String(userText || "").trim();
+        if (!textValue) throw new Error("A non-empty message is required.");
+        dialogue.turn++;
+        dialogue.activeDirective = true;
+        dialogue.momentum = 1;
+        dialogue.lastUserText = textValue;
+        emitChat("user", textValue);
+        const lower = textValue.toLowerCase(), toolCalls = [];
+        let toolResult = null, response = "";
+        dialogue.intentX = /scan|inspect|where|distance|energy|status|telemetry|risk/.test(lower) ? 0 :
+            /calculate|compute|remember|memory/.test(lower) ? 0.5 : 1;
+        dialogue.intentY = /careful|carefully|conserve|slow|wait/.test(lower) ? -1 :
+            /fast|quick|speed/.test(lower) ? 1 : 0;
+        dialogue.wait = /\b(wait|stop|hold position)\b/.test(lower);
+        const waypointMatch = lower.match(/(?:waypoint|go to)\s+(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
+        if (waypointMatch) {
+            toolResult = set_waypoint(Number(waypointMatch[1]), Number(waypointMatch[2]));
+            toolCalls.push({ name: "set_waypoint", arguments: [Number(waypointMatch[1]), Number(waypointMatch[2])], result: toolResult });
+        }
+        if (/\b(scan|inspect|where|status|telemetry|obstacle distance|energy)\b/.test(lower)) {
+            toolResult = inspect_environment();
+            toolCalls.push({ name: "inspect_environment", arguments: [], result: toolResult });
+            dialogue.pendingTool = true;
+        } else if (/\b(path risk|collision risk|risk estimate)\b/.test(lower)) {
+            toolResult = estimate_path_risk();
+            toolCalls.push({ name: "estimate_path_risk", arguments: [], result: toolResult });
+            dialogue.pendingTool = true;
+        } else if (/\b(calculate|compute)\b/.test(lower)) {
+            const expression = textValue.replace(/^.*?\b(?:calculate|compute)\b/i, "").trim();
+            toolResult = { result: safeCalculate(expression) };
+            toolCalls.push({ name: "calculate", arguments: [expression], result: toolResult });
+            dialogue.pendingTool = true;
+        } else if (/\b(memory|remember|past successes|past failures)\b/.test(lower)) {
+            const outcome = /failure|failed|depletion/i.test(textValue) ? "energy-depletion" : "";
+            toolResult = query_memory(outcome);
+            toolCalls.push({ name: "query_memory", arguments: [outcome], result: toolResult });
+            dialogue.pendingTool = true;
+        } else if (lastOutput && lastOutput[4] > 0.65) {
+            toolResult = inspect_environment();
+            toolCalls.push({ name: "inspect_environment", arguments: [], result: toolResult });
+            dialogue.pendingTool = true;
+        }
+        if (dialogue.wait) {
+            velocity.x *= 0.5; velocity.y *= 0.5;
+            response = "Understood. I will reduce thrust and hold my current position while continuing to monitor the environment.";
+        } else if (toolCalls.some(call => call.name === "set_waypoint")) {
+            response = "Waypoint set to (" + toolResult.waypoint.x.toFixed(1) + ", " +
+                toolResult.waypoint.y.toFixed(1) + "). I will navigate toward it while retaining obstacle avoidance.";
+        } else if (toolCalls.length) {
+            response = "Environment report: I am at (" + agent.x.toFixed(1) + ", " +
+                agent.y.toFixed(1) + "), with " + energy.toFixed(1) + " energy remaining. " +
+                "The goal is at (" + goal.x.toFixed(1) + ", " + goal.y.toFixed(1) + "). Tool result: " + JSON.stringify(toolResult);
+        } else if (/goal|navigate|move|collect/.test(lower)) {
+            response = "I will prioritize the goal at (" + goal.x.toFixed(1) + ", " +
+                goal.y.toFixed(1) + ") and continue using the spatial policy to avoid the obstacle.";
+        } else {
+            response = "I received your instruction. My current position is (" + agent.x.toFixed(1) +
+                ", " + agent.y.toFixed(1) + ") and my energy level is " + energy.toFixed(1) +
+                ". You can ask me to inspect the environment, estimate path risk, set a waypoint, calculate an expression, or search memory.";
+        }
+        dialogue.pendingTool = false;
+        dialogue.momentum = 0.8;
+        const message = emitChat("agent", response, { toolCalls, telemetry: inspect_environment() });
+        if (toolCalls.length) addTransitionReward(singlePPOState, 0.15);
+        return { ...message, toolCalls, telemetry: inspect_environment() };
+    }
+
     function setPopulationSize(value) {
         const requestedSize = Math.round(Number(value));
         evolutionPopulationSize = clamp(
@@ -2577,9 +2788,12 @@
 
 
     const api = {
-        start, stop, getSnapshot: createSnapshot, setPopulationSize, setEvolutionMode, setAgentRadius,
-        reward: () => reinforce(true), correct: applyManualCorrection, clearMemory,
-        reset: resetBrainAndMemory, exportData: exportModelData, importData: importModelData
+        modelName: MODEL_NAME, version: NETWORK_VERSION,
+        start, stop, sendMessage, getSnapshot: createSnapshot, setPopulationSize, setEvolutionMode, setAgentRadius,
+        reward: () => { reinforce(true); addTransitionReward(singlePPOState, 1.5); },
+        correct: () => { applyManualCorrection(); addTransitionReward(singlePPOState, -1.0); },
+        clearMemory, reset: resetBrainAndMemory, exportData: exportModelData, importData: importModelData,
+        inspect_environment, set_waypoint, estimate_path_risk, calculate: safeCalculate, query_memory
     };
 
 
