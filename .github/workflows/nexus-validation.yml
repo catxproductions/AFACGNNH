@@ -1,0 +1,30 @@
+name: Nexus validation
+
+on:
+  push:
+    branches:
+      - agent-five-nexus-1.0.0
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Check JavaScript syntax
+        run: |
+          node --check agent-learning.js
+          node --check nexus-language.js
+          node --check agent-five-nexus.js
+          node --check learning-worker.js
+          node --check nexus-headless-demo.js
+          node -e "const fs=require('fs');const html=fs.readFileSync('index.html','utf8');const scripts=[...html.matchAll(/<script(?:\\s[^>]*)?>([\\s\\S]*?)<\\/script>/gi)].map(m=>m[1]).filter(x=>x.trim());if(!scripts.length)throw Error('No inline application script found');scripts.forEach((code)=>new Function(code));console.log('GitHub Pages inline JavaScript syntax: OK')"
+      - name: Run headless migration and agentic-loop demo
+        run: node nexus-headless-demo.js

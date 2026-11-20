@@ -1,11 +1,11 @@
-﻿((root) => {
+((root) => {
     "use strict";
 
 
     // Agent Five's runtime is independent of any particular UI. Host
     // applications inject world dimensions, persistence, scheduling,
     // learning services, workers, and optional rendering callbacks.
-    function createAgentFive(options = {}) {
+    function createAgentFiveNexus(options = {}) {
         const configuredWorld = options.world || options;
         const world = Object.freeze({
             width: Math.max(1, Number(configuredWorld.width) || 500),
@@ -30,14 +30,20 @@
         const cancelFrame = options.cancelFrame || clearTimeout;
 
 
-    const STORAGE_KEY = "agent5-brain-v8";
+    const MODEL_NAME = "Agent-Five-Nexus-1.0.0";
+    const MODEL_ID = "Agent-Five-Nexus-1.0.0";
+    const STORAGE_KEY = "agent5-nexus-1.0.0-brain";
+    const LEGACY_STORAGE_KEY_V8 = "agent5-brain-v8";
     const LEGACY_STORAGE_KEY_V7 = "agent5-brain-v7";
     const LEGACY_STORAGE_KEY_V6 = "agent5-brain-v6";
     const LEGACY_STORAGE_KEY_V5 = "agent5-brain-v5";
-    const MEMORY_STORAGE_KEY = "agent5-memory-v2";
+    const MEMORY_STORAGE_KEY = "agent5-nexus-1.0.0-memory";
     const LEGACY_MEMORY_STORAGE_KEY_V1 = "agent5-memory-v1";
-    const EPISODE_STORAGE_KEY = "agent5-episodes-v2";
+    const LEGACY_MEMORY_STORAGE_KEY_V2 = "agent5-memory-v2";
+    const EPISODE_STORAGE_KEY = "agent5-nexus-1.0.0-episodes";
+    const TOKENIZER_STORAGE_KEY = "agent5-nexus-1.0.0-tokenizer";
     const LEGACY_EPISODE_STORAGE_KEY_V1 = "agent5-episodes-v1";
+    const LEGACY_EPISODE_STORAGE_KEY_V2 = "agent5-episodes-v2";
     const MEMORY_CAPACITY = 192;
     const EPISODE_MEMORY_CAPACITY = 48;
     const EPISODE_SEQUENCE_LENGTH = 12;
@@ -45,16 +51,17 @@
     const MEMORY_RECALL_STRENGTH = 0.18;
     const MEMORY_FEATURE_WEIGHTS = [
         0.7, 0.7, 1.8, 1.8, 1.1, 1.1, 1.2, 0.12, 0.12, 0.75,
-        0.9, 0.9, 0.9, 0.9, 0.8, 0.5
+        0.9, 0.9, 0.9, 0.9, 0.8, 0.5,
+        0.5, 0.7, 0.7, 0.35, 0.45, 1.0, 0.8, 0.25
     ];
-    const NETWORK_VERSION = 8;
-    const INPUTS = 16;
+    const NETWORK_VERSION = 9;
+    const INPUTS = 24;
     const LEGACY_HIDDEN_LAYERS_V7 = [9, 8, 7, 6, 5, 4];
     const HIDDEN_LAYERS = [
         15, 16, 15, 14, 15, 13, 14, 12, 13, 11, 12, 10, 11,
         12, 10, 9, 10, 8, 9, 7, 8, 6, 7, 5, 6, 4
     ];
-    const OUTPUTS = 3;
+    const OUTPUTS = 5;
     const DEFAULT_AGENT_RADIUS = 10;
     const GOAL_RADIUS = 12;
     const OBSTACLE_RADIUS = 30;
@@ -89,6 +96,19 @@
     const MAX_SIMULATION_STEPS_PER_FRAME = 8;
     const EVOLUTION_TRANSITION_MS = 1200;
     const EVOLUTION_GENERATION_TIMEOUT_MS = 120000;
+
+    const languageModule = options.language || root.AgentFiveNexusLanguage;
+    let decoder = null;
+    if (languageModule && typeof languageModule.NexusDecoderNetwork === "function") {
+        try {
+            const savedBrain = JSON.parse(storage.getItem(STORAGE_KEY) || "null");
+            const savedTokenizer = JSON.parse(storage.getItem(TOKENIZER_STORAGE_KEY) || "null");
+            decoder = new languageModule.NexusDecoderNetwork({
+                tokenizerData: savedTokenizer || (savedBrain && savedBrain.decoder && savedBrain.decoder.tokenizer),
+                saved: savedBrain && savedBrain.decoder
+            });
+        } catch (error) { decoder = new languageModule.NexusDecoderNetwork(); }
+    }
 
 
     class NeuralNetwork {
@@ -149,6 +169,7 @@
 
         export() {
             return {
+                modelName: MODEL_NAME,
                 version: NETWORK_VERSION,
                 modelType: this.modelType,
                 architecture: this.sizes.slice(),
@@ -191,15 +212,15 @@
 
 
     function legacyBrainShape(data) {
-        if (!data || ![5, 6, 7].includes(data.version) ||
+        if (!data || ![5, 6, 7, 8].includes(data.version) ||
             !Array.isArray(data.architecture) || !Array.isArray(data.weights) ||
             !Array.isArray(data.biases)) return null;
 
 
-        const oldInputs = data.version === 5 ? 9 : data.version === 6 ? 10 : INPUTS;
-        const outputSize = data.modelType === "critic" ||
-            data.architecture[data.architecture.length - 1] === 1 ? 1 : OUTPUTS;
-        const oldSizes = [oldInputs, ...LEGACY_HIDDEN_LAYERS_V7, outputSize];
+        const oldInputs = data.version === 5 ? 9 : data.version === 6 ? 10 : 16;
+        const outputSize = Number(data.architecture[data.architecture.length - 1]);
+        const hidden = data.version === 8 ? HIDDEN_LAYERS : LEGACY_HIDDEN_LAYERS_V7;
+        const oldSizes = [oldInputs, ...hidden, outputSize];
         const validArchitecture = data.architecture.length === oldSizes.length &&
             data.architecture.every((size, index) => size === oldSizes[index]);
         const validWeights = data.weights.length === oldSizes.length - 1 &&
@@ -230,10 +251,33 @@
         if (!shape) return null;
 
 
-        const migrated = new NeuralNetwork(null, shape.outputSize).export();
+        const migrated = new NeuralNetwork(null, shape.outputSize === 1 ? 1 : OUTPUTS).export();
         migrated.weights = migrated.weights.map(matrix =>
             matrix.map(row => row.map(() => 0)));
         migrated.biases = migrated.biases.map(vector => vector.map(() => 0));
+
+        if (data.version === 8) {
+            for (let layer = 0; layer < HIDDEN_LAYERS.length; layer++) {
+                for (let source = 0; source < data.weights[layer].length; source++) {
+                    for (let target = 0; target < data.weights[layer][source].length; target++) {
+                        migrated.weights[layer][source][target] = data.weights[layer][source][target];
+                    }
+                }
+                migrated.biases[layer] = data.biases[layer].slice();
+            }
+            const finalLayer = HIDDEN_LAYERS.length;
+            for (let source = 0; source < data.weights[finalLayer].length; source++) {
+                for (let output = 0; output < Math.min(shape.outputSize, OUTPUTS); output++) {
+                    migrated.weights[finalLayer][source][output] = data.weights[finalLayer][source][output];
+                }
+            }
+            for (let output = 0; output < Math.min(shape.outputSize, OUTPUTS); output++) {
+                migrated.biases[finalLayer][output] = data.biases[finalLayer][output];
+            }
+            return { ...migrated, modelName: MODEL_NAME, version: NETWORK_VERSION,
+                modelType: shape.outputSize === 1 ? "critic" : "policy",
+                architecture: [INPUTS, ...HIDDEN_LAYERS, shape.outputSize === 1 ? 1 : OUTPUTS] };
+        }
 
 
         for (let layer = 0; layer < LEGACY_HIDDEN_LAYERS_V7.length; layer++) {
@@ -279,14 +323,17 @@
                     oldOutputLayer[sourceIndex][outputIndex] * 2.5;
             }
         }
-        migrated.biases[finalLayer] = data.biases[data.biases.length - 1].slice();
+        for (let outputIndex = 0; outputIndex < shape.outputSize; outputIndex++) {
+            migrated.biases[finalLayer][outputIndex] = data.biases[data.biases.length - 1][outputIndex];
+        }
 
 
         return {
             ...migrated,
+            modelName: MODEL_NAME,
             version: NETWORK_VERSION,
             modelType: shape.outputSize === 1 ? "critic" : "policy",
-            architecture: [INPUTS, ...HIDDEN_LAYERS, shape.outputSize]
+            architecture: [INPUTS, ...HIDDEN_LAYERS, shape.outputSize === 1 ? 1 : OUTPUTS]
         };
     }
 
@@ -311,6 +358,7 @@
 
 
             const legacySources = [
+                storage.getItem(LEGACY_STORAGE_KEY_V8),
                 storage.getItem(LEGACY_STORAGE_KEY_V7),
                 storage.getItem(LEGACY_STORAGE_KEY_V6),
                 storage.getItem(LEGACY_STORAGE_KEY_V5)
@@ -347,6 +395,7 @@
 
     function defaultMemoryPriority(outcome) {
         if (outcome === "goal-reward") return 3;
+        if (outcome === "chat-helpful") return 2.8;
         if (outcome === "energy-depletion") return 2.4;
         if (outcome === "wall-contact") return 2.1;
         return 1.4;
@@ -360,7 +409,7 @@
         // v7 stored obstacle-closing speed at index 14 and goal distance at
         // index 15. v8 replaces those slots with goal distance and energy use.
         const inputs = values.slice();
-        if (remapV7Ordering && inputs.length === INPUTS) {
+        if (remapV7Ordering && inputs.length === 16) {
             inputs[14] = values[15];
             inputs[15] = 0;
         }
@@ -376,7 +425,7 @@
 
     function normalizeMemoryItem(item, remapV7Ordering = false) {
         if (!item || !Array.isArray(item.inputs) ||
-            !Array.isArray(item.target) || item.target.length !== OUTPUTS ||
+            !Array.isArray(item.target) || ![3, 5].includes(item.target.length) ||
             !item.target.every(Number.isFinite) || typeof item.outcome !== "string") return null;
 
 
@@ -387,7 +436,8 @@
         const now = Date.now();
         return {
             inputs,
-            target: item.target.map(value => clamp(value, -1, 1)),
+            target: item.target.concat(Array(Math.max(0, OUTPUTS - item.target.length)).fill(0))
+                .slice(0, OUTPUTS).map(value => clamp(value, -1, 1)),
             outcome: item.outcome,
             priority: clamp(Number.isFinite(item.priority) ? item.priority : defaultMemoryPriority(item.outcome), 0.1, 4),
             createdAt: Number.isFinite(item.createdAt) && item.createdAt > 0 ? item.createdAt : now,
@@ -454,9 +504,12 @@
             if (currentRaw) return normalizeMemoryCollection(JSON.parse(currentRaw));
 
 
-            const legacyRaw = storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V1);
-            if (!legacyRaw) return [];
-            const migrated = normalizeMemoryCollection(JSON.parse(legacyRaw), true);
+            const legacyV2 = storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V2);
+            const legacyV1 = storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V1);
+            if (!legacyV2 && !legacyV1) return [];
+            const migrated = normalizeMemoryCollection(
+                JSON.parse(legacyV2 || legacyV1), !legacyV2
+            );
             storage.setItem(MEMORY_STORAGE_KEY, JSON.stringify(migrated));
             return migrated;
         } catch (error) {
@@ -471,13 +524,14 @@
             typeof item.outcome !== "string") return null;
         const steps = item.steps.slice(-EPISODE_SEQUENCE_LENGTH).map(step => {
             if (!step || !Array.isArray(step.inputs) ||
-                !Array.isArray(step.target) || step.target.length !== OUTPUTS ||
+                !Array.isArray(step.target) || ![3, 5].includes(step.target.length) ||
                 !step.target.every(Number.isFinite) || !Number.isFinite(step.reward)) return null;
             const inputs = normalizeObservationInputs(step.inputs, remapV7Ordering);
             if (!inputs) return null;
             return {
                 inputs,
-                target: step.target.map(value => clamp(value, -1, 1)),
+                target: step.target.concat(Array(Math.max(0, OUTPUTS - step.target.length)).fill(0))
+                    .slice(0, OUTPUTS).map(value => clamp(value, -1, 1)),
                 reward: clamp(step.reward, -8, 8)
             };
         });
@@ -502,11 +556,12 @@
             }
 
 
-            const legacyRaw = storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V1);
-            if (!legacyRaw) return [];
-            const legacy = JSON.parse(legacyRaw);
+            const legacyV2 = storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V2);
+            const legacyV1 = storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V1);
+            if (!legacyV2 && !legacyV1) return [];
+            const legacy = JSON.parse(legacyV2 || legacyV1);
             const migrated = Array.isArray(legacy) ?
-                legacy.map(item => normalizeEpisode(item, true)).filter(Boolean).slice(-EPISODE_MEMORY_CAPACITY) : [];
+                legacy.map(item => normalizeEpisode(item, !legacyV2)).filter(Boolean).slice(-EPISODE_MEMORY_CAPACITY) : [];
             storage.setItem(EPISODE_STORAGE_KEY, JSON.stringify(migrated));
             return migrated;
         } catch (error) {
@@ -546,7 +601,9 @@
             target: [
                 clamp(item.action[0], -1, 1),
                 clamp(item.action[1], -1, 1),
-                clamp(item.action[2] * 2 - 1, -1, 1)
+                clamp(item.action[2] * 2 - 1, -1, 1),
+                clamp((item.action[3] ?? 0.5) * 2 - 1, -1, 1),
+                clamp((item.action[4] ?? 0.5) * 2 - 1, -1, 1)
             ],
             reward: clamp(item.reward, -8, 8)
         }));
@@ -604,7 +661,8 @@
             "goal-reward": "Goal reward",
             "behavior-correction": "Behavior correction",
             "energy-depletion": "Energy depletion",
-            "wall-contact": "Wall contact"
+            "wall-contact": "Wall contact",
+            "chat-helpful": "Helpful chat interaction"
         };
         return labels[outcome] || "Other experience";
     }
@@ -614,6 +672,9 @@
         const selected = evolutionaryMode ?
             (evolutionSuccessor || getEvolutionDisplayAgent()) : null;
         return {
+            modelName: MODEL_NAME,
+            version: NETWORK_VERSION,
+            language: decoder ? { trainedTokens: decoder.trainedTokens, vocabularySize: decoder.tokenizer.vocabulary.length } : null,
             dimensions: world,
             config: {
                 maxEnergy: MAX_ENERGY, goalRadius: GOAL_RADIUS,
@@ -625,6 +686,7 @@
                 policyRate: PPO_POLICY_RATE, valueRate: PPO_VALUE_RATE, policyStd: PPO_POLICY_STD
             },
             agent: { ...agent }, velocity: { ...velocity }, goal: { ...goal }, obstacle: { ...obstacle },
+            goalsCollected,
             energy, energyDepleted, energyUsageRate,
             lastInputs: lastInputs ? lastInputs.slice() : null,
             lastOutput: lastOutput ? lastOutput.slice() : null,
@@ -817,7 +879,7 @@
     let ppoRequestId = 0;
     let learningWorker = null;
     let lastTransition = null;
-    let lastPlannedMean = [0, 0, 0];
+    let lastPlannedMean = [0, 0, 0, 0, 0];
     let simulationAccumulator = 0;
     let simulationClock = 0;
     let evolutionMutationRate = EVOLUTION_MUTATION_RATE;
@@ -825,6 +887,7 @@
     let evolutionDiversity = 0;
     let previousGenerationDuration = null;
     let trainingExamples = 0;
+    let goalsCollected = 0;
     let trainingRewards = 0;
     let trainingCorrections = 0;
     let wallPenaltyFrames = 0;
@@ -838,7 +901,7 @@
     let goal = { x: 395, y: 100 };
     let obstacle = { x: 245, y: 250 };
     let lastInputs = null;
-    let lastOutput = [0, 0, 0];
+    let lastOutput = [0, 0, 0, 0, 0];
     let lastMemoryRecall = 0;
     let lastMemoryRecallCount = 0;
     let saveCountdown = 0;
@@ -849,6 +912,16 @@
     let energy = MAX_ENERGY;
     let energyUsageRate = 0;
     let energyDepleted = false;
+    const dialogue = {
+        activeDirective: false, intentX: 0, intentY: 0, momentum: 0,
+        pendingTool: false, hazardUrgency: 0, missionProgress: 0,
+        conversationalEnergy: 1, wait: false, missionWaypoint: null,
+        turn: 0, lastUserText: "", lastAssistantText: "",
+        missionGoalTarget: 1, missionGoalsCompleted: 0
+    };
+    const environmentEventTimes = new Map();
+    let lastAutonomousSpeechAt = 0;
+    let lastAutonomousToolAt = 0;
     let lastFrameTimestamp = null;
     let running = false;
     let frameHandle = null;
@@ -945,7 +1018,7 @@
     function initializeLearningWorker() {
         if (typeof createWorker !== "function") return;
         try {
-            learningWorker = createWorker("learning-worker.js?v=20261106-neural-v8");
+            learningWorker = createWorker("learning-worker.js?v=nexus-1.0.0");
             learningWorker.addEventListener("message", handlePPOWorkerMessage);
             learningWorker.addEventListener("error", error => {
                 console.warn("Agent Five learning worker stopped; using the safe main-thread fallback.", error);
@@ -1132,7 +1205,7 @@
     }
 
 
-    function createObservation(position, currentVelocity, target, block, currentEnergy, currentEnergyUsageRate = 0) {
+    function createObservation(position, currentVelocity, target, block, currentEnergy, currentEnergyUsageRate = 0, context = dialogue) {
         const radius = position.radius ?? DEFAULT_AGENT_RADIUS;
         const goalDx = (target.x - position.x) / world.width;
         const goalDy = (target.y - position.y) / world.height;
@@ -1161,11 +1234,30 @@
         const normalizedEnergyUsageRate = clamp(currentEnergyUsageRate, 0, 1);
 
 
+        const waypoint = context.missionWaypoint;
+        const missionDistance = waypoint ?
+            distance(waypoint.x - position.x, waypoint.y - position.y) :
+            distance(target.x - position.x, target.y - position.y);
+        context.hazardUrgency = clamp(
+            (AVOIDANCE_RANGE - gap) / AVOIDANCE_RANGE + Math.hypot(currentVelocity.x, currentVelocity.y) / SPEED * 0.25,
+            0, 1
+        );
+        context.conversationalEnergy = energyLeft;
         return [
             currentSpeedX, currentSpeedY, goalDx, goalDy, obstacleDx, obstacleDy,
             clearance, currentLocationX, currentLocationY, energyLeft,
             leftClearance, rightClearance, topClearance, bottomClearance,
-            goalDistance, normalizedEnergyUsageRate
+            goalDistance, normalizedEnergyUsageRate,
+            context.activeDirective ? 1 : 0,
+            clamp(context.intentX, -1, 1),
+            clamp(context.intentY, -1, 1),
+            clamp(context.momentum, 0, 1),
+            context.pendingTool ? 1 : 0,
+            context.hazardUrgency,
+            clamp(context.missionGoalTarget > 1 ?
+                context.missionGoalsCompleted / context.missionGoalTarget :
+                1 - missionDistance / Math.hypot(world.width, world.height), 0, 1),
+            context.conversationalEnergy
         ];
     }
 
@@ -1177,10 +1269,12 @@
 
     function saveBrain() {
         try {
-            storage.setItem(STORAGE_KEY, JSON.stringify({
-                ...brain.export(),
-                critic: critic.export()
-            }));
+            const payload = {
+                ...brain.export(), modelName: MODEL_NAME, version: NETWORK_VERSION,
+                critic: critic.export(), ...(decoder ? { decoder: decoder.export() } : {})
+            };
+            storage.setItem(STORAGE_KEY, JSON.stringify(payload));
+            if (decoder) storage.setItem(TOKENIZER_STORAGE_KEY, JSON.stringify(decoder.tokenizer.export()));
             if (typeof ui.setModelStatus === "function") ui.setModelStatus("Actor + critic saved");
         } catch (error) {
             console.warn("Could not save Agent Five's actor-critic model.", error);
@@ -1199,8 +1293,9 @@
     function reinforce(isReward) {
         if (!lastInputs) return;
         const target = lastOutput.map((value, index) => {
-            if (isReward) return index < 2 ? clamp(value * 1.1, -1, 1) : value;
-            return index < 2 ? 0 : Math.min(value, 0);
+            if (index < 2) return isReward ? clamp(value * 1.1, -1, 1) : 0;
+            const policyValue = clamp(value * 2 - 1, -1, 1);
+            return isReward ? policyValue : Math.min(policyValue, 0);
         });
         storeExperience(memories, lastInputs, target,
             isReward ? "goal-reward" : "behavior-correction");
@@ -1221,7 +1316,7 @@
         else if (position.x >= world.width - radius - 0.001) targetX = -WALL_ESCAPE_TARGET;
         if (position.y <= radius + 0.001) targetY = WALL_ESCAPE_TARGET;
         else if (position.y >= world.height - radius - 0.001) targetY = -WALL_ESCAPE_TARGET;
-        return [targetX, targetY, 0];
+        return [targetX, targetY, 0, 0, 0];
     }
 
 
@@ -1258,7 +1353,9 @@
         const target = [
             clamp(lastOutput[0] * (isReward ? 1.08 : 0), -1, 1),
             clamp(lastOutput[1] * (isReward ? 1.08 : 0), -1, 1),
-            clamp(lastOutput[2] * 2 - 1, -1, 1)
+            clamp(lastOutput[2] * 2 - 1, -1, 1),
+            clamp(lastOutput[3] * 2 - 1, -1, 1),
+            clamp(lastOutput[4] * 2 - 1, -1, 1)
         ];
         addMemory(memories, lastInputs, target,
             isReward ? "goal-reward" : "behavior-correction");
@@ -1280,7 +1377,9 @@
         const target = [
             clamp(candidate.lastOutput[0] * (isReward ? 1.08 : 0), -1, 1),
             clamp(candidate.lastOutput[1] * (isReward ? 1.08 : 0), -1, 1),
-            clamp(candidate.lastOutput[2] * 2 - 1, -1, 1)
+            clamp(candidate.lastOutput[2] * 2 - 1, -1, 1),
+            clamp(candidate.lastOutput[3] * 2 - 1, -1, 1),
+            clamp(candidate.lastOutput[4] * 2 - 1, -1, 1)
         ];
         addMemory(candidate.memories, candidate.lastInputs, target,
             isReward ? "goal-reward" : "behavior-correction");
@@ -1313,16 +1412,19 @@
             candidate.environment.goal,
             candidate.environment.obstacle,
             candidate.energy,
-            candidate.energyUsageRate
+            candidate.energyUsageRate,
+            candidate.dialogue
         );
     }
 
 
     function reinforceEvolutionAgent(candidate, isReward) {
         if (!candidate.lastInputs) return;
-        const target = candidate.lastOutput.map((value, index) =>
-            isReward ? (index < 2 ? clamp(value * 1.1, -1, 1) : value) :
-                (index < 2 ? 0 : Math.min(value, 0)));
+        const target = candidate.lastOutput.map((value, index) => {
+            if (index < 2) return isReward ? clamp(value * 1.1, -1, 1) : 0;
+            const policyValue = clamp(value * 2 - 1, -1, 1);
+            return isReward ? policyValue : Math.min(policyValue, 0);
+        });
         storeExperience(candidate.memories, candidate.lastInputs, target,
             isReward ? "goal-reward" : "behavior-correction");
         candidate.trainingExamples++;
@@ -1403,6 +1505,16 @@
                 energyUsageRate: 0,
                 energyDepleted: false,
                 goalsCollected: 0,
+                taskCompletionScore: 0,
+                dialogue: {
+                    activeDirective: true, intentX: 1,
+                    intentY: index % 3 === 0 ? -1 : 0,
+                    momentum: 0.8, pendingTool: false,
+                    hazardUrgency: 0, missionProgress: 0,
+                    conversationalEnergy: 1, wait: false,
+                    missionWaypoint: null, missionGoalTarget: 2,
+                    missionGoalsCompleted: 0
+                },
                 network: cloneNetwork(parentNetwork, mutationRate, mutationStrength),
                 critic: cloneNetwork(parentCritic, mutationRate, mutationStrength),
                 memories: cloneMemories(parentMemories),
@@ -1416,7 +1528,7 @@
                 ppoToken: 0,
                 progressScore: 0,
                 lastInputs: null,
-                lastOutput: [0, 0, 0],
+                lastOutput: [0, 0, 0, 0, 0],
                 lastActivations: null,
                 lastMemoryRecall: 0,
                 lastMemoryRecallCount: 0,
@@ -1440,6 +1552,8 @@
         return evolutionPopulation.reduce((best, candidate) => {
             if (!best || candidate.goalsCollected > best.goalsCollected) return candidate;
             if (candidate.goalsCollected < best.goalsCollected) return best;
+            if ((candidate.taskCompletionScore || 0) > (best.taskCompletionScore || 0)) return candidate;
+            if ((candidate.taskCompletionScore || 0) < (best.taskCompletionScore || 0)) return best;
             if (candidate.progressScore > best.progressScore) return candidate;
             if (candidate.progressScore < best.progressScore) return best;
             if (candidate.energy > best.energy) return candidate;
@@ -1741,6 +1855,12 @@
                 addTransitionReward(candidate, 3.5);
                 candidate.energy = MAX_ENERGY;
                 candidate.goalsCollected++;
+                candidate.dialogue.missionGoalsCompleted++;
+                candidate.dialogue.missionProgress = clamp(
+                    candidate.dialogue.missionGoalsCompleted / candidate.dialogue.missionGoalTarget, 0, 1
+                );
+                candidate.taskCompletionScore = candidate.dialogue.missionProgress;
+                if (candidate.dialogue.missionProgress >= 1) candidate.dialogue.activeDirective = false;
                 candidate.stillSince = null;
                 reachedGoal = true;
 
@@ -2159,14 +2279,30 @@
 
         const previousX = agent.x;
         const previousY = agent.y;
-        const goalDistanceBefore = distance(goal.x - agent.x, goal.y - agent.y);
+        const activeTarget = dialogue.missionWaypoint || goal;
+        const goalDistanceBefore = distance(activeTarget.x - agent.x, activeTarget.y - agent.y);
         let additionalEnergyCost = 0;
-        lastInputs = observe(agent, goal, obstacle);
+        lastInputs = observe(agent, activeTarget, obstacle);
         const decision = planAndSampleAction(
             brain, critic, lastInputs, agent, velocity,
-            { goal, obstacle }, energy, memories, episodes
+            { goal: activeTarget, obstacle }, energy, memories, episodes
         );
         lastOutput = decision.action;
+        if (lastOutput[3] > 0.94 && now - lastAutonomousSpeechAt > 15000) {
+            lastAutonomousSpeechAt = now;
+            emitChat("agent", "Status: I am navigating with " + energy.toFixed(1) + " energy remaining.");
+        }
+        if (lastOutput[4] > 0.96 && now - lastAutonomousToolAt > 12000) {
+            lastAutonomousToolAt = now;
+            dialogue.pendingTool = true;
+            const telemetryResult = inspect_environment();
+            emitChat("agent", "Autonomous environment inspection completed.", {
+                toolCalls: [{ name: "inspect_environment", arguments: [], result: telemetryResult }],
+                telemetry: telemetryResult
+            });
+            dialogue.pendingTool = false;
+            addTransitionReward(singlePPOState, 0.05);
+        }
         lastMemoryRecall = decision.memoryRecall.strength;
         lastMemoryRecallCount = decision.memoryRecall.count;
         lastPlannedMean = decision.mean || lastPlannedMean;
@@ -2178,6 +2314,15 @@
         }
 
 
+        if (dialogue.wait) {
+            lastOutput[0] = 0;
+            lastOutput[1] = 0;
+            lastOutput[2] = 1;
+        } else if (dialogue.intentY < -0.5) {
+            lastOutput[0] *= 0.55;
+            lastOutput[1] *= 0.55;
+            lastOutput[2] = Math.max(lastOutput[2], 0.7);
+        }
         const brake = clamp(lastOutput[2], 0, 1);
         const damping = 1 - brake * BRAKING_STRENGTH;
         velocity.x = clamp((velocity.x + lastOutput[0] * ACCELERATION) * damping, -SPEED, SPEED);
@@ -2207,6 +2352,7 @@
         if (wallContact && !touchingWall) {
             stillSince = now;
             additionalEnergyCost += ENERGY_WALL_IMPACT_COST;
+            emitEnvironmentEvent("<ENV_WALL>", "I contacted the arena boundary. I am correcting my trajectory.");
         }
         touchingWall = wallContact;
 
@@ -2223,7 +2369,14 @@
 
 
         const goalDistanceAfterMovement = distance(goal.x - agent.x, goal.y - agent.y);
+        const missionDistanceAfterMovement = distance(activeTarget.x - agent.x, activeTarget.y - agent.y);
+        if (dialogue.missionWaypoint &&
+            missionDistanceAfterMovement < agent.radius + GOAL_RADIUS) {
+            dialogue.missionWaypoint = null;
+            emitEnvironmentEvent("<ENV_GOAL>", "Waypoint reached. Returning to the arena goal objective.");
+        }
         if (goalDistanceAfterMovement < agent.radius + GOAL_RADIUS) {
+            goalsCollected++;
             reinforce(true);
             addTransitionReward(singlePPOState, 3.5);
             energy = MAX_ENERGY;
@@ -2231,6 +2384,19 @@
             rememberEpisode(episodes, singlePPOState.trajectory, "goal");
             singlePPOState.trajectory = [];
             saveEpisodes();
+            emitEnvironmentEvent("<ENV_GOAL>", "Goal collected. Energy restored and the next target has been assigned.");
+            dialogue.missionGoalsCompleted++;
+            dialogue.missionProgress = clamp(
+                dialogue.missionGoalsCompleted / Math.max(1, dialogue.missionGoalTarget), 0, 1
+            );
+            if (dialogue.missionGoalsCompleted >= dialogue.missionGoalTarget) {
+                dialogue.activeDirective = false;
+                dialogue.missionWaypoint = null;
+            }
+            if (dialogue.missionWaypoint &&
+                distance(dialogue.missionWaypoint.x - agent.x, dialogue.missionWaypoint.y - agent.y) < agent.radius + GOAL_RADIUS) {
+                dialogue.missionWaypoint = null;
+            }
             moveGoal();
             stillSince = null;
         }
@@ -2250,13 +2416,21 @@
             reinforce(false);
             stillSince = now;
             additionalEnergyCost += ENERGY_OBSTACLE_IMPACT_COST;
+            emitEnvironmentEvent("<ENV_OBSTACLE>", "Obstacle contact detected. I am applying a rebound and revising my path.");
         }
 
 
         const distanceMoved = distance(agent.x - previousX, agent.y - previousY);
         const energyBefore = energy;
         consumeEnergy(distanceMoved, frameScale, additionalEnergyCost);
-        const progressReward = clamp((goalDistanceBefore - goalDistanceAfterMovement) / 90, -0.10, 0.10);
+        if (energyDepleted) {
+            emitEnvironmentEvent("<ENV_LOW_ENERGY>", "Energy is depleted. I am pausing movement until recovery or user guidance.");
+        }
+        if (dialogue.hazardUrgency > 0.8) {
+            emitEnvironmentEvent("<ENV_OBSTACLE>", "Lookahead indicates a nearby obstacle hazard; I am prioritizing clearance.");
+        }
+        dialogue.momentum *= 0.998;
+        const progressReward = clamp((goalDistanceBefore - missionDistanceAfterMovement) / 90, -0.10, 0.10);
         lastTransition.reward = clamp(
             lastTransition.reward + progressReward - (energyBefore - energy) * 0.003,
             -8, 8
@@ -2333,7 +2507,7 @@
         lastMemoryRecallCount = 0;
         saveMemory();
         saveEpisodes();
-        updateDiagnostics(lastInputs || Array(INPUTS).fill(0), lastOutput || [0, 0, 0]);
+        updateDiagnostics(lastInputs || Array(INPUTS).fill(0), lastOutput || [0, 0, 0, 0, 0]);
         showFeedback("State and episodic memories cleared. The actor and critic were kept.");
     }
 
@@ -2362,6 +2536,7 @@
         memories = [];
         episodes = [];
         trainingExamples = 0;
+        goalsCollected = 0;
         trainingRewards = 0;
         trainingCorrections = 0;
         wallPenaltyFrames = 0;
@@ -2397,9 +2572,12 @@
         const exportEpisodes = selectedEvolutionAgent && selectedEvolutionAgent.episodes ?
             selectedEvolutionAgent.episodes : episodes;
         return {
+            modelName: MODEL_NAME,
+            version: NETWORK_VERSION,
             ...exportSource.export(),
             critic: exportCritic.export(),
-            memoryVersion: 3,
+            ...(decoder ? { decoder: decoder.export(), tokenizer: decoder.tokenizer.export() } : {}),
+            memoryVersion: 4,
             memory: cloneMemories(exportMemories),
             episodes: cloneEpisodes(exportEpisodes)
         };
@@ -2413,7 +2591,7 @@
         const validator = new NeuralNetwork(null);
         const importedModel = validator.isValid(data) ? data : migrateLegacyBrain(data);
         if (!importedModel || importedModel.modelType !== "policy") {
-            throw new Error("This JSON is not a compatible Agent Five v8 actor or a migratable v5/v6/v7 brain.");
+            throw new Error("This JSON is not a compatible Nexus v9 actor or a migratable v5-v8 brain.");
         }
         const criticValidator = new NeuralNetwork(null, 1);
         const importedCriticModel = criticValidator.isValid(data.critic) ?
@@ -2459,6 +2637,11 @@
         lastTransition = null;
         brain = new NeuralNetwork(importedModel);
         critic = importedCritic;
+        if (decoder && data.decoder && !decoder.import(data.decoder)) throw new Error("The included Nexus language decoder is invalid.");
+        if (decoder && !data.decoder && data.tokenizer) {
+            decoder.tokenizer = new languageModule.NexusTokenizer(data.tokenizer);
+            decoder.ensureVocabulary();
+        }
         if (includedMemory) {
             memories = importedMemories;
             lastMemoryRecall = 0;
@@ -2481,6 +2664,230 @@
         return importedParts;
     }
 
+
+    function safeCalculate(expression) {
+        const source = String(expression || "").replace(/\s+/g, "");
+        if (!source || source.length > 120 || !/^[0-9.+\-*/()%]+$/.test(source)) {
+            throw new Error("Only basic arithmetic expressions are supported.");
+        }
+        const tokens = source.match(/\d+(?:\.\d+)?|[()+\-*/%]/g) || [];
+        if (tokens.join("") !== source) throw new Error("Invalid arithmetic expression.");
+        let cursor = 0;
+        function primary() {
+            const token = tokens[cursor++];
+            if (token === "+") return primary();
+            if (token === "-") return -primary();
+            if (token === "(") {
+                const value = sum();
+                if (tokens[cursor++] !== ")") throw new Error("Missing closing parenthesis.");
+                return value;
+            }
+            const value = Number(token);
+            if (!Number.isFinite(value)) throw new Error("Invalid number.");
+            return value;
+        }
+        function product() {
+            let value = primary();
+            while (["*", "/", "%"].includes(tokens[cursor])) {
+                const op = tokens[cursor++], rhs = primary();
+                if ((op === "/" || op === "%") && rhs === 0) throw new Error("Division by zero.");
+                value = op === "*" ? value * rhs : op === "/" ? value / rhs : value % rhs;
+            }
+            return value;
+        }
+        function sum() {
+            let value = product();
+            while (tokens[cursor] === "+" || tokens[cursor] === "-") {
+                const op = tokens[cursor++], rhs = product();
+                value = op === "+" ? value + rhs : value - rhs;
+            }
+            return value;
+        }
+        const result = sum();
+        if (cursor !== tokens.length || !Number.isFinite(result)) throw new Error("Invalid arithmetic expression.");
+        return result;
+    }
+
+    function inspect_environment() {
+        const radius = agent.radius || DEFAULT_AGENT_RADIUS;
+        const obstacleDistance = distance(obstacle.x - agent.x, obstacle.y - agent.y);
+        return {
+            position: { x: Number(agent.x.toFixed(2)), y: Number(agent.y.toFixed(2)) },
+            goal: { x: goal.x, y: goal.y }, obstacle: { x: obstacle.x, y: obstacle.y },
+            velocity: { x: Number(velocity.x.toFixed(3)), y: Number(velocity.y.toFixed(3)) },
+            clearances: {
+                left: Number((agent.x - radius).toFixed(2)),
+                right: Number((world.width - radius - agent.x).toFixed(2)),
+                top: Number((agent.y - radius).toFixed(2)),
+                bottom: Number((world.height - radius - agent.y).toFixed(2)),
+                obstacle: Number((obstacleDistance - OBSTACLE_RADIUS - radius).toFixed(2))
+            },
+            energy: Number(energy.toFixed(2)), energyUsageRate: Number(energyUsageRate.toFixed(4))
+        };
+    }
+
+    function set_waypoint(x, y) {
+        const nextX = Number(x), nextY = Number(y);
+        if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) throw new Error("Waypoint coordinates must be finite numbers.");
+        dialogue.missionWaypoint = {
+            x: clamp(nextX, agent.radius, world.width - agent.radius),
+            y: clamp(nextY, agent.radius, world.height - agent.radius)
+        };
+        dialogue.activeDirective = true;
+        dialogue.intentX = 1;
+        dialogue.intentY = 0;
+        return { waypoint: { ...dialogue.missionWaypoint } };
+    }
+
+    function estimate_path_risk() {
+        const inputs = lastInputs || observe(agent, dialogue.missionWaypoint || goal, obstacle);
+        const result = brain.forward(inputs);
+        const planned = learning.planAction(result.output, {
+            x: agent.x, y: agent.y, velocity, goal: dialogue.missionWaypoint || goal, obstacle
+        }, {
+            width: world.width, height: world.height, speed: SPEED,
+            acceleration: ACCELERATION, brakingStrength: BRAKING_STRENGTH,
+            agentRadius: agent.radius, obstacleRadius: OBSTACLE_RADIUS,
+            avoidanceRange: AVOIDANCE_RANGE, horizon: 12, blend: 0.24
+        });
+        const gap = distance(obstacle.x - agent.x, obstacle.y - agent.y) - OBSTACLE_RADIUS - agent.radius;
+        const risk = clamp((AVOIDANCE_RANGE - gap) / AVOIDANCE_RANGE, 0, 1) *
+            (0.5 + 0.5 * Math.hypot(planned[0], planned[1]));
+        return { risk: Number(risk.toFixed(3)), plannedAction: planned.slice(0, 3), obstacleGap: Number(gap.toFixed(2)) };
+    }
+
+    function query_memory(outcomeType) {
+        const matches = memories.filter(item => !outcomeType || item.outcome === outcomeType)
+            .slice(-12).map(item => ({
+                outcome: item.outcome, priority: item.priority,
+                ageMs: Math.max(0, Date.now() - item.createdAt),
+                inputs: item.inputs.slice(), target: item.target.slice()
+            }));
+        return { count: matches.length, matches };
+    }
+
+    function decoderContext() {
+        const policy = brain.forward(lastInputs || Array(INPUTS).fill(0));
+        const hidden = policy.activations[policy.activations.length - 2] || [];
+        const telemetry = inspect_environment();
+        return [hidden[0] || 0, hidden[1] || 0, hidden[2] || 0, hidden[3] || 0,
+            clamp(telemetry.position.x / world.width, 0, 1),
+            clamp(telemetry.position.y / world.height, 0, 1),
+            clamp(telemetry.energy / MAX_ENERGY, 0, 1),
+            clamp(distance(goal.x - agent.x, goal.y - agent.y) / Math.hypot(world.width, world.height), 0, 1)];
+    }
+
+    function generateText(prompt, maximumTokens = 32) {
+        if (!decoder) return "";
+        const ids = decoder.generate("<BOS> " + String(prompt || ""), decoderContext(), maximumTokens);
+        return decoder.tokenizer.decode(ids);
+    }
+
+    function emitChat(sender, textValue, extra = {}) {
+        if (decoder) {
+            const marker = sender === "user" ? "<USER>" : sender === "agent" ? "<AGENT>" : "<ENV>";
+            decoder.trainSequence(marker + " " + String(textValue), decoderContext());
+        }
+        const message = {
+            model: MODEL_NAME, sender, text: String(textValue),
+            tokens: String(textValue).split(/\s+/).filter(Boolean),
+            toolCalls: extra.toolCalls || [], telemetry: extra.telemetry || inspect_environment()
+        };
+        if (typeof ui.onChatMessage === "function") ui.onChatMessage(message);
+        if (sender === "agent") {
+            dialogue.lastAssistantText = message.text;
+            if (typeof ui.onTokenStream === "function") {
+                for (const token of message.tokens) ui.onTokenStream(token + " ");
+            }
+        }
+        return message;
+    }
+
+    function emitEnvironmentEvent(token, detail) {
+        const now = getNow();
+        const previous = environmentEventTimes.get(token) || 0;
+        if (now - previous < 1400) return false;
+        environmentEventTimes.set(token, now);
+        emitChat("environment", token + " " + detail);
+        emitChat("agent", detail);
+        return true;
+    }
+
+    function sendMessage(userText) {
+        const textValue = String(userText || "").trim();
+        if (!textValue) throw new Error("A non-empty message is required.");
+        dialogue.turn++;
+        dialogue.activeDirective = true;
+        dialogue.momentum = 1;
+        dialogue.lastUserText = textValue;
+        emitChat("user", textValue);
+        const lower = textValue.toLowerCase(), toolCalls = [];
+        let toolResult = null, waypointResult = null, response = "";
+        dialogue.intentX = /scan|inspect|where|distance|energy|status|telemetry|risk/.test(lower) ? 0 :
+            /calculate|compute|remember|memory/.test(lower) ? 0.5 : 1;
+        dialogue.intentY = /careful|carefully|conserve|slow|wait/.test(lower) ? -1 :
+            /fast|quick|speed/.test(lower) ? 1 : 0;
+        dialogue.wait = /\b(wait|stop|hold position)\b/.test(lower);
+        const collectMatch = lower.match(/collect\s+(\d+)\s+goals?/);
+        if (collectMatch) {
+            dialogue.missionGoalTarget = clamp(Math.floor(Number(collectMatch[1])), 1, 100);
+            dialogue.missionGoalsCompleted = 0;
+            dialogue.missionProgress = 0;
+        }
+        const waypointMatch = lower.match(/(?:waypoint|go to)\s+(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
+        if (waypointMatch) {
+            waypointResult = set_waypoint(Number(waypointMatch[1]), Number(waypointMatch[2]));
+            toolResult = waypointResult;
+            toolCalls.push({ name: "set_waypoint", arguments: [Number(waypointMatch[1]), Number(waypointMatch[2])], result: waypointResult });
+        }
+        if (/\b(scan|inspect|where|status|telemetry|obstacle distance|energy)\b/.test(lower)) {
+            toolResult = inspect_environment();
+            toolCalls.push({ name: "inspect_environment", arguments: [], result: toolResult });
+            dialogue.pendingTool = true;
+        } else if (/\b(path risk|collision risk|risk estimate)\b/.test(lower)) {
+            toolResult = estimate_path_risk();
+            toolCalls.push({ name: "estimate_path_risk", arguments: [], result: toolResult });
+            dialogue.pendingTool = true;
+        } else if (/\b(calculate|compute)\b/.test(lower)) {
+            const expression = textValue.replace(/^.*?\b(?:calculate|compute)\b/i, "").trim();
+            toolResult = { result: safeCalculate(expression) };
+            toolCalls.push({ name: "calculate", arguments: [expression], result: toolResult });
+            dialogue.pendingTool = true;
+        } else if (/\b(memory|remember|past successes|past failures)\b/.test(lower)) {
+            const outcome = /failure|failed|depletion/i.test(textValue) ? "energy-depletion" : "";
+            toolResult = query_memory(outcome);
+            toolCalls.push({ name: "query_memory", arguments: [outcome], result: toolResult });
+            dialogue.pendingTool = true;
+        } else if (lastOutput && lastOutput[4] > 0.65) {
+            toolResult = inspect_environment();
+            toolCalls.push({ name: "inspect_environment", arguments: [], result: toolResult });
+            dialogue.pendingTool = true;
+        }
+        if (dialogue.wait) {
+            velocity.x *= 0.5; velocity.y *= 0.5;
+            response = "Understood. I will reduce thrust and hold my current position while continuing to monitor the environment.";
+        } else if (waypointResult) {
+            response = "Waypoint set to (" + waypointResult.waypoint.x.toFixed(1) + ", " +
+                waypointResult.waypoint.y.toFixed(1) + "). I will navigate toward it while retaining obstacle avoidance.";
+        } else if (toolCalls.length) {
+            response = "Environment report: I am at (" + agent.x.toFixed(1) + ", " +
+                agent.y.toFixed(1) + "), with " + energy.toFixed(1) + " energy remaining. " +
+                "The goal is at (" + goal.x.toFixed(1) + ", " + goal.y.toFixed(1) + "). Tool result: " + JSON.stringify(toolResult);
+        } else if (/goal|navigate|move|collect/.test(lower)) {
+            response = "I will prioritize the goal at (" + goal.x.toFixed(1) + ", " +
+                goal.y.toFixed(1) + ") and continue using the spatial policy to avoid the obstacle.";
+        } else {
+            response = "I received your instruction. My current position is (" + agent.x.toFixed(1) +
+                ", " + agent.y.toFixed(1) + ") and my energy level is " + energy.toFixed(1) +
+                ". You can ask me to inspect the environment, estimate path risk, set a waypoint, calculate an expression, or search memory.";
+        }
+        dialogue.momentum = 0.8;
+        const message = emitChat("agent", response, { toolCalls, telemetry: inspect_environment() });
+        dialogue.pendingTool = false;
+        if (toolCalls.length) addTransitionReward(singlePPOState, 0.15);
+        saveBrain();
+        return { ...message, toolCalls, telemetry: inspect_environment() };
+    }
 
     function setPopulationSize(value) {
         const requestedSize = Math.round(Number(value));
@@ -2539,9 +2946,17 @@
 
 
     const api = {
-        start, stop, getSnapshot: createSnapshot, setPopulationSize, setEvolutionMode, setAgentRadius,
-        reward: () => reinforce(true), correct: applyManualCorrection, clearMemory,
-        reset: resetBrainAndMemory, exportData: exportModelData, importData: importModelData
+        modelName: MODEL_NAME, version: NETWORK_VERSION,
+        start, stop, sendMessage, getSnapshot: createSnapshot, setPopulationSize, setEvolutionMode, setAgentRadius,
+        reward: () => {
+            reinforce(true);
+            if (lastInputs && lastOutput) storeExperience(memories, lastInputs,
+                lastOutput.map((value, index) => index < 2 ? value : value * 2 - 1), "chat-helpful");
+            saveMemory(); saveBrain();
+        },
+        correct: applyManualCorrection,
+        clearMemory, reset: resetBrainAndMemory, exportData: exportModelData, importData: importModelData,
+        inspect_environment, set_waypoint, estimate_path_risk, calculate: safeCalculate, query_memory, generateText
     };
 
 
@@ -2553,5 +2968,6 @@
     }
 
 
-    root.AgentFiveCore = Object.freeze({ create: createAgentFive });
+    root.AgentFiveNexusCore = Object.freeze({ create: createAgentFiveNexus, modelName: "Agent-Five-Nexus-1.0.0", modelId: "Agent-Five-Nexus-1.0.0", version: 9 });
+    root.AgentFiveCore = root.AgentFiveNexusCore;
 })(globalThis);
