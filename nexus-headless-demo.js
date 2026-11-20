@@ -37,6 +37,11 @@ storageData.set("agent5-brain-v8", JSON.stringify({
     ...makeLegacyV8Model(3, "policy"),
     critic: makeLegacyV8Model(1, "critic")
 }));
+storageData.set("agent5-memory-v2", JSON.stringify([{
+    inputs: Array(16).fill(0),
+    target: [0, 0, 0],
+    outcome: "goal-reward"
+}]));
 const storage = {
     getItem(key) { return storageData.has(key) ? storageData.get(key) : null; },
     setItem(key, value) { storageData.set(key, String(value)); },
@@ -76,6 +81,13 @@ for (let frame = 0; frame < 60; frame++) {
 const response = agent.sendMessage("scan obstacle distance and report my energy");
 agent.reward();
 const snapshot = agent.getSnapshot();
+const exported = agent.exportData();
+if (snapshot.lastInputs.length !== 24 || snapshot.memories.length !== 1 ||
+    !exported.decoder || !exported.tokenizer ||
+    !response.toolCalls.some(call => call.name === "inspect_environment") ||
+    agent.calculate("2 * (3 + 4)") !== 14) {
+    throw new Error("Nexus multimodal, tool, persistence, or arithmetic smoke check failed.");
+}
 agent.stop();
 
 console.log(JSON.stringify({
