@@ -909,6 +909,8 @@
         conversationalEnergy: 1, wait: false, missionWaypoint: null,
         turn: 0, lastUserText: "", lastAssistantText: ""
     };
+    const environmentEventTimes = new Map();
+    let lastAutonomousSpeechAt = 0;
     let lastFrameTimestamp = null;
     let running = false;
     let frameHandle = null;
@@ -2247,6 +2249,10 @@
             { goal: activeTarget, obstacle }, energy, memories, episodes
         );
         lastOutput = decision.action;
+        if (lastOutput[3] > 0.94 && now - lastAutonomousSpeechAt > 15000) {
+            lastAutonomousSpeechAt = now;
+            emitChat("agent", "Status: I am navigating with " + energy.toFixed(1) + " energy remaining.");
+        }
         lastMemoryRecall = decision.memoryRecall.strength;
         lastMemoryRecallCount = decision.memoryRecall.count;
         lastPlannedMean = decision.mean || lastPlannedMean;
@@ -2258,6 +2264,15 @@
         }
 
 
+        if (dialogue.wait) {
+            lastOutput[0] = 0;
+            lastOutput[1] = 0;
+            lastOutput[2] = 1;
+        } else if (dialogue.intentY < -0.5) {
+            lastOutput[0] *= 0.55;
+            lastOutput[1] *= 0.55;
+            lastOutput[2] = Math.max(lastOutput[2], 0.7);
+        }
         const brake = clamp(lastOutput[2], 0, 1);
         const damping = 1 - brake * BRAKING_STRENGTH;
         velocity.x = clamp((velocity.x + lastOutput[0] * ACCELERATION) * damping, -SPEED, SPEED);
@@ -2287,6 +2302,7 @@
         if (wallContact && !touchingWall) {
             stillSince = now;
             additionalEnergyCost += ENERGY_WALL_IMPACT_COST;
+            emitEnvironmentEvent("<ENV_WALL>", "I contacted the arena boundary. I am correcting my trajectory.");
         }
         touchingWall = wallContact;
 
@@ -2311,6 +2327,12 @@
             rememberEpisode(episodes, singlePPOState.trajectory, "goal");
             singlePPOState.trajectory = [];
             saveEpisodes();
+            emitEnvironmentEvent("<ENV_GOAL>", "Goal collected. Energy restored and the next target has been assigned.");
+            dialogue.missionProgress = clamp(dialogue.missionProgress + 0.2, 0, 1);
+            if (dialogue.missionWaypoint &&
+                distance(dialogue.missionWaypoint.x - agent.x, dialogue.missionWaypoint.y - agent.y) < agent.radius + GOAL_RADIUS) {
+                dialogue.missionWaypoint = null;
+            }
             moveGoal();
             stillSince = null;
         }
@@ -2330,12 +2352,20 @@
             reinforce(false);
             stillSince = now;
             additionalEnergyCost += ENERGY_OBSTACLE_IMPACT_COST;
+            emitEnvironmentEvent("<ENV_OBSTACLE>", "Obstacle contact detected. I am applying a rebound and revising my path.");
         }
 
 
         const distanceMoved = distance(agent.x - previousX, agent.y - previousY);
         const energyBefore = energy;
         consumeEnergy(distanceMoved, frameScale, additionalEnergyCost);
+        if (energyDepleted) {
+            emitEnvironmentEvent("<ENV_LOW_ENERGY>", "Energy is depleted. I am pausing movement until recovery or user guidance.");
+        }
+        if (dialogue.hazardUrgency > 0.8) {
+            emitEnvironmentEvent("<ENV_OBSTACLE>", "Lookahead indicates a nearby obstacle hazard; I am prioritizing clearance.");
+        }
+        dialogue.momentum *= 0.998;
         const progressReward = clamp((goalDistanceBefore - goalDistanceAfterMovement) / 90, -0.10, 0.10);
         lastTransition.reward = clamp(
             lastTransition.reward + progressReward - (energyBefore - energy) * 0.003,
@@ -2708,6 +2738,16 @@
         return message;
     }
 
+    function emitEnvironmentEvent(token, detail) {
+        const now = getNow();
+        const previous = environmentEventTimes.get(token) || 0;
+        if (now - previous < 1400) return false;
+        environmentEventTimes.set(token, now);
+        emitChat("environment", token + " " + detail);
+        emitChat("agent", detail);
+        return true;
+    }
+
     function sendMessage(userText) {
         const textValue = String(userText || "").trim();
         if (!textValue) throw new Error("A non-empty message is required.");
@@ -2773,6 +2813,7 @@
         dialogue.momentum = 0.8;
         const message = emitChat("agent", response, { toolCalls, telemetry: inspect_environment() });
         if (toolCalls.length) addTransitionReward(singlePPOState, 0.15);
+        saveBrain();
         return { ...message, toolCalls, telemetry: inspect_environment() };
     }
 
