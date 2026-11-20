@@ -1308,7 +1308,7 @@
         else if (position.x >= world.width - radius - 0.001) targetX = -WALL_ESCAPE_TARGET;
         if (position.y <= radius + 0.001) targetY = WALL_ESCAPE_TARGET;
         else if (position.y >= world.height - radius - 0.001) targetY = -WALL_ESCAPE_TARGET;
-        return [targetX, targetY, 0];
+        return [targetX, targetY, 0, 0, 0];
     }
 
 
@@ -1345,7 +1345,9 @@
         const target = [
             clamp(lastOutput[0] * (isReward ? 1.08 : 0), -1, 1),
             clamp(lastOutput[1] * (isReward ? 1.08 : 0), -1, 1),
-            clamp(lastOutput[2] * 2 - 1, -1, 1)
+            clamp(lastOutput[2] * 2 - 1, -1, 1),
+            clamp(lastOutput[3] * 2 - 1, -1, 1),
+            clamp(lastOutput[4] * 2 - 1, -1, 1)
         ];
         addMemory(memories, lastInputs, target,
             isReward ? "goal-reward" : "behavior-correction");
@@ -1367,7 +1369,9 @@
         const target = [
             clamp(candidate.lastOutput[0] * (isReward ? 1.08 : 0), -1, 1),
             clamp(candidate.lastOutput[1] * (isReward ? 1.08 : 0), -1, 1),
-            clamp(candidate.lastOutput[2] * 2 - 1, -1, 1)
+            clamp(candidate.lastOutput[2] * 2 - 1, -1, 1),
+            clamp(candidate.lastOutput[3] * 2 - 1, -1, 1),
+            clamp(candidate.lastOutput[4] * 2 - 1, -1, 1)
         ];
         addMemory(candidate.memories, candidate.lastInputs, target,
             isReward ? "goal-reward" : "behavior-correction");
@@ -2938,10 +2942,9 @@
             reinforce(true);
             if (lastInputs && lastOutput) storeExperience(memories, lastInputs,
                 lastOutput.map((value, index) => index < 2 ? value : value * 2 - 1), "chat-helpful");
-            addTransitionReward(singlePPOState, 1.5);
             saveMemory(); saveBrain();
         },
-        correct: () => { applyManualCorrection(); addTransitionReward(singlePPOState, -1.0); },
+        correct: applyManualCorrection,
         clearMemory, reset: resetBrainAndMemory, exportData: exportModelData, importData: importModelData,
         inspect_environment, set_waypoint, estimate_path_risk, calculate: safeCalculate, query_memory, generateText
     };
