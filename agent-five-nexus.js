@@ -1197,7 +1197,7 @@
     }
 
 
-    function createObservation(position, currentVelocity, target, block, currentEnergy, currentEnergyUsageRate = 0) {
+    function createObservation(position, currentVelocity, target, block, currentEnergy, currentEnergyUsageRate = 0, context = dialogue) {
         const radius = position.radius ?? DEFAULT_AGENT_RADIUS;
         const goalDx = (target.x - position.x) / world.width;
         const goalDy = (target.y - position.y) / world.height;
@@ -1226,30 +1226,30 @@
         const normalizedEnergyUsageRate = clamp(currentEnergyUsageRate, 0, 1);
 
 
-        const waypoint = dialogue.missionWaypoint;
+        const waypoint = context.missionWaypoint;
         const missionDistance = waypoint ?
             distance(waypoint.x - position.x, waypoint.y - position.y) :
             distance(target.x - position.x, target.y - position.y);
-        dialogue.hazardUrgency = clamp(
+        context.hazardUrgency = clamp(
             (AVOIDANCE_RANGE - gap) / AVOIDANCE_RANGE + Math.hypot(currentVelocity.x, currentVelocity.y) / SPEED * 0.25,
             0, 1
         );
-        dialogue.conversationalEnergy = energyLeft;
+        context.conversationalEnergy = energyLeft;
         return [
             currentSpeedX, currentSpeedY, goalDx, goalDy, obstacleDx, obstacleDy,
             clearance, currentLocationX, currentLocationY, energyLeft,
             leftClearance, rightClearance, topClearance, bottomClearance,
             goalDistance, normalizedEnergyUsageRate,
-            dialogue.activeDirective ? 1 : 0,
-            clamp(dialogue.intentX, -1, 1),
-            clamp(dialogue.intentY, -1, 1),
-            clamp(dialogue.momentum, 0, 1),
-            dialogue.pendingTool ? 1 : 0,
-            dialogue.hazardUrgency,
-            clamp(dialogue.missionGoalTarget > 1 ?
-                dialogue.missionGoalsCompleted / dialogue.missionGoalTarget :
+            context.activeDirective ? 1 : 0,
+            clamp(context.intentX, -1, 1),
+            clamp(context.intentY, -1, 1),
+            clamp(context.momentum, 0, 1),
+            context.pendingTool ? 1 : 0,
+            context.hazardUrgency,
+            clamp(context.missionGoalTarget > 1 ?
+                context.missionGoalsCompleted / context.missionGoalTarget :
                 1 - missionDistance / Math.hypot(world.width, world.height), 0, 1),
-            dialogue.conversationalEnergy
+            context.conversationalEnergy
         ];
     }
 
@@ -1400,16 +1400,19 @@
             candidate.environment.goal,
             candidate.environment.obstacle,
             candidate.energy,
-            candidate.energyUsageRate
+            candidate.energyUsageRate,
+            candidate.dialogue
         );
     }
 
 
     function reinforceEvolutionAgent(candidate, isReward) {
         if (!candidate.lastInputs) return;
-        const target = candidate.lastOutput.map((value, index) =>
-            isReward ? (index < 2 ? clamp(value * 1.1, -1, 1) : value) :
-                (index < 2 ? 0 : Math.min(value, 0)));
+        const target = candidate.lastOutput.map((value, index) => {
+            if (index < 2) return isReward ? clamp(value * 1.1, -1, 1) : 0;
+            const policyValue = clamp(value * 2 - 1, -1, 1);
+            return isReward ? policyValue : Math.min(policyValue, 0);
+        });
         storeExperience(candidate.memories, candidate.lastInputs, target,
             isReward ? "goal-reward" : "behavior-correction");
         candidate.trainingExamples++;
@@ -1490,6 +1493,16 @@
                 energyUsageRate: 0,
                 energyDepleted: false,
                 goalsCollected: 0,
+                taskCompletionScore: 0,
+                dialogue: {
+                    activeDirective: true, intentX: 1,
+                    intentY: index % 3 === 0 ? -1 : 0,
+                    momentum: 0.8, pendingTool: false,
+                    hazardUrgency: 0, missionProgress: 0,
+                    conversationalEnergy: 1, wait: false,
+                    missionWaypoint: null, missionGoalTarget: 2,
+                    missionGoalsCompleted: 0
+                },
                 network: cloneNetwork(parentNetwork, mutationRate, mutationStrength),
                 critic: cloneNetwork(parentCritic, mutationRate, mutationStrength),
                 memories: cloneMemories(parentMemories),
@@ -1503,7 +1516,7 @@
                 ppoToken: 0,
                 progressScore: 0,
                 lastInputs: null,
-                lastOutput: [0, 0, 0],
+                lastOutput: [0, 0, 0, 0, 0],
                 lastActivations: null,
                 lastMemoryRecall: 0,
                 lastMemoryRecallCount: 0,
