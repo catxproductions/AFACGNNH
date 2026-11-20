@@ -1,4 +1,4 @@
-﻿((root) => {
+((root) => {
     "use strict";
 
 
@@ -30,13 +30,16 @@
         const cancelFrame = options.cancelFrame || clearTimeout;
 
 
-    const STORAGE_KEY = "agent5-brain-v8";
+    const MODEL_NAME = "Agent-Five-Nexus-1.0.0";
+    const STORAGE_KEY = "agent5-nexus-1.0.0-brain";
+    const LEGACY_STORAGE_KEY_V8 = "agent5-brain-v8";
     const LEGACY_STORAGE_KEY_V7 = "agent5-brain-v7";
     const LEGACY_STORAGE_KEY_V6 = "agent5-brain-v6";
     const LEGACY_STORAGE_KEY_V5 = "agent5-brain-v5";
-    const MEMORY_STORAGE_KEY = "agent5-memory-v2";
+    const MEMORY_STORAGE_KEY = "agent5-nexus-1.0.0-memory";
     const LEGACY_MEMORY_STORAGE_KEY_V1 = "agent5-memory-v1";
-    const EPISODE_STORAGE_KEY = "agent5-episodes-v2";
+    const EPISODE_STORAGE_KEY = "agent5-nexus-1.0.0-episodes";
+    const TOKENIZER_STORAGE_KEY = "agent5-nexus-1.0.0-tokenizer";
     const LEGACY_EPISODE_STORAGE_KEY_V1 = "agent5-episodes-v1";
     const MEMORY_CAPACITY = 192;
     const EPISODE_MEMORY_CAPACITY = 48;
@@ -45,16 +48,17 @@
     const MEMORY_RECALL_STRENGTH = 0.18;
     const MEMORY_FEATURE_WEIGHTS = [
         0.7, 0.7, 1.8, 1.8, 1.1, 1.1, 1.2, 0.12, 0.12, 0.75,
-        0.9, 0.9, 0.9, 0.9, 0.8, 0.5
+        0.9, 0.9, 0.9, 0.9, 0.8, 0.5,
+        0.5, 0.7, 0.7, 0.35, 0.45, 1.0, 0.8, 0.25
     ];
-    const NETWORK_VERSION = 8;
-    const INPUTS = 16;
+    const NETWORK_VERSION = 9;
+    const INPUTS = 24;
     const LEGACY_HIDDEN_LAYERS_V7 = [9, 8, 7, 6, 5, 4];
     const HIDDEN_LAYERS = [
         15, 16, 15, 14, 15, 13, 14, 12, 13, 11, 12, 10, 11,
         12, 10, 9, 10, 8, 9, 7, 8, 6, 7, 5, 6, 4
     ];
-    const OUTPUTS = 3;
+    const OUTPUTS = 5;
     const DEFAULT_AGENT_RADIUS = 10;
     const GOAL_RADIUS = 12;
     const OBSTACLE_RADIUS = 30;
@@ -149,6 +153,7 @@
 
         export() {
             return {
+                modelName: MODEL_NAME,
                 version: NETWORK_VERSION,
                 modelType: this.modelType,
                 architecture: this.sizes.slice(),
@@ -191,15 +196,15 @@
 
 
     function legacyBrainShape(data) {
-        if (!data || ![5, 6, 7].includes(data.version) ||
+        if (!data || ![5, 6, 7, 8].includes(data.version) ||
             !Array.isArray(data.architecture) || !Array.isArray(data.weights) ||
             !Array.isArray(data.biases)) return null;
 
 
-        const oldInputs = data.version === 5 ? 9 : data.version === 6 ? 10 : INPUTS;
-        const outputSize = data.modelType === "critic" ||
-            data.architecture[data.architecture.length - 1] === 1 ? 1 : OUTPUTS;
-        const oldSizes = [oldInputs, ...LEGACY_HIDDEN_LAYERS_V7, outputSize];
+        const oldInputs = data.version === 5 ? 9 : data.version === 6 ? 10 : 16;
+        const outputSize = Number(data.architecture[data.architecture.length - 1]);
+        const hidden = data.version === 8 ? HIDDEN_LAYERS : LEGACY_HIDDEN_LAYERS_V7;
+        const oldSizes = [oldInputs, ...hidden, outputSize];
         const validArchitecture = data.architecture.length === oldSizes.length &&
             data.architecture.every((size, index) => size === oldSizes[index]);
         const validWeights = data.weights.length === oldSizes.length - 1 &&
@@ -230,10 +235,33 @@
         if (!shape) return null;
 
 
-        const migrated = new NeuralNetwork(null, shape.outputSize).export();
+        const migrated = new NeuralNetwork(null, shape.outputSize === 1 ? 1 : OUTPUTS).export();
         migrated.weights = migrated.weights.map(matrix =>
             matrix.map(row => row.map(() => 0)));
         migrated.biases = migrated.biases.map(vector => vector.map(() => 0));
+
+        if (data.version === 8) {
+            for (let layer = 0; layer < HIDDEN_LAYERS.length; layer++) {
+                for (let source = 0; source < data.weights[layer].length; source++) {
+                    for (let target = 0; target < data.weights[layer][source].length; target++) {
+                        migrated.weights[layer][source][target] = data.weights[layer][source][target];
+                    }
+                }
+                migrated.biases[layer] = data.biases[layer].slice();
+            }
+            const finalLayer = HIDDEN_LAYERS.length;
+            for (let source = 0; source < data.weights[finalLayer].length; source++) {
+                for (let output = 0; output < Math.min(shape.outputSize, OUTPUTS); output++) {
+                    migrated.weights[finalLayer][source][output] = data.weights[finalLayer][source][output];
+                }
+            }
+            for (let output = 0; output < Math.min(shape.outputSize, OUTPUTS); output++) {
+                migrated.biases[finalLayer][output] = data.biases[finalLayer][output];
+            }
+            return { ...migrated, modelName: MODEL_NAME, version: NETWORK_VERSION,
+                modelType: shape.outputSize === 1 ? "critic" : "policy",
+                architecture: [INPUTS, ...HIDDEN_LAYERS, shape.outputSize === 1 ? 1 : OUTPUTS] };
+        }
 
 
         for (let layer = 0; layer < LEGACY_HIDDEN_LAYERS_V7.length; layer++) {
@@ -279,11 +307,14 @@
                     oldOutputLayer[sourceIndex][outputIndex] * 2.5;
             }
         }
-        migrated.biases[finalLayer] = data.biases[data.biases.length - 1].slice();
+        for (let outputIndex = 0; outputIndex < shape.outputSize; outputIndex++) {
+            migrated.biases[finalLayer][outputIndex] = data.biases[data.biases.length - 1][outputIndex];
+        }
 
 
         return {
             ...migrated,
+            modelName: MODEL_NAME,
             version: NETWORK_VERSION,
             modelType: shape.outputSize === 1 ? "critic" : "policy",
             architecture: [INPUTS, ...HIDDEN_LAYERS, shape.outputSize]
@@ -311,6 +342,7 @@
 
 
             const legacySources = [
+                storage.getItem(LEGACY_STORAGE_KEY_V8),
                 storage.getItem(LEGACY_STORAGE_KEY_V7),
                 storage.getItem(LEGACY_STORAGE_KEY_V6),
                 storage.getItem(LEGACY_STORAGE_KEY_V5)
@@ -376,7 +408,7 @@
 
     function normalizeMemoryItem(item, remapV7Ordering = false) {
         if (!item || !Array.isArray(item.inputs) ||
-            !Array.isArray(item.target) || item.target.length !== OUTPUTS ||
+            !Array.isArray(item.target) || ![3, 5].includes(item.target.length) ||
             !item.target.every(Number.isFinite) || typeof item.outcome !== "string") return null;
 
 
@@ -387,7 +419,8 @@
         const now = Date.now();
         return {
             inputs,
-            target: item.target.map(value => clamp(value, -1, 1)),
+            target: item.target.concat(Array(Math.max(0, OUTPUTS - item.target.length)).fill(0))
+                .slice(0, OUTPUTS).map(value => clamp(value, -1, 1)),
             outcome: item.outcome,
             priority: clamp(Number.isFinite(item.priority) ? item.priority : defaultMemoryPriority(item.outcome), 0.1, 4),
             createdAt: Number.isFinite(item.createdAt) && item.createdAt > 0 ? item.createdAt : now,
@@ -471,13 +504,14 @@
             typeof item.outcome !== "string") return null;
         const steps = item.steps.slice(-EPISODE_SEQUENCE_LENGTH).map(step => {
             if (!step || !Array.isArray(step.inputs) ||
-                !Array.isArray(step.target) || step.target.length !== OUTPUTS ||
+                !Array.isArray(step.target) || ![3, 5].includes(step.target.length) ||
                 !step.target.every(Number.isFinite) || !Number.isFinite(step.reward)) return null;
             const inputs = normalizeObservationInputs(step.inputs, remapV7Ordering);
             if (!inputs) return null;
             return {
                 inputs,
-                target: step.target.map(value => clamp(value, -1, 1)),
+                target: step.target.concat(Array(Math.max(0, OUTPUTS - step.target.length)).fill(0))
+                    .slice(0, OUTPUTS).map(value => clamp(value, -1, 1)),
                 reward: clamp(step.reward, -8, 8)
             };
         });
@@ -614,6 +648,8 @@
         const selected = evolutionaryMode ?
             (evolutionSuccessor || getEvolutionDisplayAgent()) : null;
         return {
+            modelName: MODEL_NAME,
+            version: NETWORK_VERSION,
             dimensions: world,
             config: {
                 maxEnergy: MAX_ENERGY, goalRadius: GOAL_RADIUS,
@@ -2333,7 +2369,7 @@
         lastMemoryRecallCount = 0;
         saveMemory();
         saveEpisodes();
-        updateDiagnostics(lastInputs || Array(INPUTS).fill(0), lastOutput || [0, 0, 0]);
+        updateDiagnostics(lastInputs || Array(INPUTS).fill(0), lastOutput || [0, 0, 0, 0, 0]);
         showFeedback("State and episodic memories cleared. The actor and critic were kept.");
     }
 
@@ -2397,6 +2433,8 @@
         const exportEpisodes = selectedEvolutionAgent && selectedEvolutionAgent.episodes ?
             selectedEvolutionAgent.episodes : episodes;
         return {
+            modelName: MODEL_NAME,
+            version: NETWORK_VERSION,
             ...exportSource.export(),
             critic: exportCritic.export(),
             memoryVersion: 3,
@@ -2413,7 +2451,7 @@
         const validator = new NeuralNetwork(null);
         const importedModel = validator.isValid(data) ? data : migrateLegacyBrain(data);
         if (!importedModel || importedModel.modelType !== "policy") {
-            throw new Error("This JSON is not a compatible Agent Five v8 actor or a migratable v5/v6/v7 brain.");
+            throw new Error("This JSON is not a compatible Nexus v9 actor or a migratable v5-v8 brain.");
         }
         const criticValidator = new NeuralNetwork(null, 1);
         const importedCriticModel = criticValidator.isValid(data.critic) ?
@@ -2553,5 +2591,6 @@
     }
 
 
-    root.AgentFiveCore = Object.freeze({ create: createAgentFive });
+    root.AgentFiveNexusCore = Object.freeze({ create: createAgentFive, modelName: MODEL_NAME, version: NETWORK_VERSION });
+    root.AgentFiveCore = root.AgentFiveNexusCore;
 })(globalThis);
