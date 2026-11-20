@@ -13,9 +13,11 @@ Nexus is the v9 continuation of the Agent Five embodied-agent prototype. The imp
 
 ## Run on GitHub Pages
 
-The repository now includes a static browser application at `index.html`. It loads the learning, language, and Nexus runtime scripts directly and provides the live simulation, chat, telemetry, reward/correction controls, evolution toggle, and model import/export.
+The repository includes a complete static browser application at `index.html`. A visitor opens the published GitHub Pages URL and the app starts automatically: no terminal, command line, package installation, build step, account, API key, or user configuration is required. The page loads its JavaScript files directly from the same repository and runs the simulation and learning loop in the browser.
 
-A Pages deployment workflow is included at `.github/workflows/deploy-pages.yml`. In the repository's **Settings → Pages**, set the build/deployment source to **GitHub Actions**. Pushes to `agent-five-nexus-1.0.0` then trigger deployment. The published URL appears in the workflow's `github-pages` deployment environment.
+Agent Five's canonical on-screen form is a **solid red circle** moving around a 2D plane. The goal, obstacle, movement trail, chat, and learning telemetry are environment/UI elements; they do not change the agent's canonical shape.
+
+A Pages deployment workflow is included at `.github/workflows/deploy-pages.yml`. The repository owner must enable GitHub Pages once in **Settings → Pages** and choose **GitHub Actions** as the source; that is a one-time repository publishing setting, not a setup step for visitors. Pushes to `agent-five-nexus-1.0.0` then trigger deployment. The published URL appears in the workflow's `github-pages` deployment environment.
 
 The app uses browser `localStorage` for persistence. Model data stays in that browser unless explicitly exported. The core simulation does not require a backend or API key.
 
