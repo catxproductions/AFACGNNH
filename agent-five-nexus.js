@@ -395,6 +395,7 @@
 
     function defaultMemoryPriority(outcome) {
         if (outcome === "goal-reward") return 3;
+        if (outcome === "chat-helpful") return 2.8;
         if (outcome === "energy-depletion") return 2.4;
         if (outcome === "wall-contact") return 2.1;
         return 1.4;
@@ -656,7 +657,8 @@
             "goal-reward": "Goal reward",
             "behavior-correction": "Behavior correction",
             "energy-depletion": "Energy depletion",
-            "wall-contact": "Wall contact"
+            "wall-contact": "Wall contact",
+            "chat-helpful": "Helpful chat interaction"
         };
         return labels[outcome] || "Other experience";
     }
