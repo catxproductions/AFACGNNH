@@ -2808,7 +2808,7 @@
         dialogue.lastUserText = textValue;
         emitChat("user", textValue);
         const lower = textValue.toLowerCase(), toolCalls = [];
-        let toolResult = null, response = "";
+        let toolResult = null, waypointResult = null, response = "";
         dialogue.intentX = /scan|inspect|where|distance|energy|status|telemetry|risk/.test(lower) ? 0 :
             /calculate|compute|remember|memory/.test(lower) ? 0.5 : 1;
         dialogue.intentY = /careful|carefully|conserve|slow|wait/.test(lower) ? -1 :
@@ -2822,8 +2822,9 @@
         }
         const waypointMatch = lower.match(/(?:waypoint|go to)\s+(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
         if (waypointMatch) {
-            toolResult = set_waypoint(Number(waypointMatch[1]), Number(waypointMatch[2]));
-            toolCalls.push({ name: "set_waypoint", arguments: [Number(waypointMatch[1]), Number(waypointMatch[2])], result: toolResult });
+            waypointResult = set_waypoint(Number(waypointMatch[1]), Number(waypointMatch[2]));
+            toolResult = waypointResult;
+            toolCalls.push({ name: "set_waypoint", arguments: [Number(waypointMatch[1]), Number(waypointMatch[2])], result: waypointResult });
         }
         if (/\b(scan|inspect|where|status|telemetry|obstacle distance|energy)\b/.test(lower)) {
             toolResult = inspect_environment();
@@ -2851,9 +2852,9 @@
         if (dialogue.wait) {
             velocity.x *= 0.5; velocity.y *= 0.5;
             response = "Understood. I will reduce thrust and hold my current position while continuing to monitor the environment.";
-        } else if (toolCalls.some(call => call.name === "set_waypoint")) {
-            response = "Waypoint set to (" + toolResult.waypoint.x.toFixed(1) + ", " +
-                toolResult.waypoint.y.toFixed(1) + "). I will navigate toward it while retaining obstacle avoidance.";
+        } else if (waypointResult) {
+            response = "Waypoint set to (" + waypointResult.waypoint.x.toFixed(1) + ", " +
+                waypointResult.waypoint.y.toFixed(1) + "). I will navigate toward it while retaining obstacle avoidance.";
         } else if (toolCalls.length) {
             response = "Environment report: I am at (" + agent.x.toFixed(1) + ", " +
                 agent.y.toFixed(1) + "), with " + energy.toFixed(1) + " energy remaining. " +
