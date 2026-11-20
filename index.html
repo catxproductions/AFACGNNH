@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="description" content="Agent Five Nexus — an interactive learning agent in a live 2D environment.">
+  <title>Agent Five Nexus</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1020;--panel:#121a2d;--panel2:#0e1628;--line:#26334d;--text:#edf3ff;--muted:#9aa9c2;--cyan:#66e3df;--blue:#8da8ff;--green:#8ee3ad;--amber:#ffd17a;--red:#ff8585}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 18% 0%,#172745 0,transparent 38%),var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+    button,input{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:10px;background:#1a2740;color:var(--text);padding:9px 13px;transition:.15s}button:hover{border-color:var(--cyan);transform:translateY(-1px)}button.primary{background:var(--cyan);border-color:var(--cyan);color:#07141a;font-weight:750}button.danger{color:#ffaaaa}button:disabled{opacity:.5;cursor:not-allowed;transform:none}
+    .shell{max-width:1440px;margin:auto;padding:26px clamp(14px,3vw,38px) 40px}.top{display:flex;justify-content:space-between;align-items:center;gap:18px;margin-bottom:22px}.brand{display:flex;align-items:center;gap:13px}.mark{width:42px;height:42px;border-radius:13px;background:linear-gradient(135deg,var(--cyan),#7e94ff);display:grid;place-items:center;color:#08131c;font-weight:900;font-size:20px}.eyebrow{color:var(--cyan);font-size:11px;letter-spacing:.17em;text-transform:uppercase;font-weight:800}.brand h1{font-size:22px;margin:0;letter-spacing:-.04em}.sub{color:var(--muted);font-size:13px}.status{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:13px}.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px #8ee3ad88}.layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(330px,.85fr);gap:18px;align-items:start}.panel{background:linear-gradient(180deg,#141e33ee,#10182aee);border:1px solid var(--line);border-radius:16px;box-shadow:0 16px 50px #0002;overflow:hidden}.panel-head{padding:15px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}.panel-head h2{font-size:14px;margin:0;font-weight:750}.panel-body{padding:17px}.arena-wrap{padding:14px;background:#0a1221}.arena{display:block;width:100%;aspect-ratio:1.25;max-height:590px;border-radius:10px;background:#0a1425;border:1px solid #243653}.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.stat{background:var(--panel2);border:1px solid var(--line);padding:12px;border-radius:12px;min-width:0}.stat label{display:block;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.08em}.stat strong{display:block;font-size:21px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meter{height:6px;background:#26334d;border-radius:10px;overflow:hidden;margin-top:8px}.meter span{height:100%;display:block;background:linear-gradient(90deg,var(--cyan),var(--green));width:0%;transition:width .2s}.right{display:grid;gap:18px}.chat{height:300px;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:14px;background:#0c1425;border-radius:11px;border:1px solid var(--line)}.msg{max-width:94%;padding:10px 12px;border-radius:12px;font-size:13px;overflow-wrap:anywhere}.msg.user{align-self:flex-end;background:#233655}.msg.agent{align-self:flex-start;background:#17263a;border:1px solid #2a4560}.msg.environment{align-self:flex-start;background:#29243a;color:#d8caff;border:1px solid #4a3d65}.msg small{display:block;color:var(--muted);font-size:10px;margin-bottom:3px;text-transform:uppercase;letter-spacing:.08em}.composer{display:flex;gap:8px;margin-top:10px}.composer input{min-width:0;flex:1;background:#0b1425;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:11px 12px;outline:none}.composer input:focus{border-color:var(--cyan)}.quick{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.quick button{font-size:11px;padding:6px 9px;color:var(--muted)}.metric-list{display:grid;grid-template-columns:1fr 1fr;gap:10px}.metric{background:#0e1729;border:1px solid var(--line);border-radius:11px;padding:11px}.metric span{display:block;color:var(--muted);font-size:11px}.metric b{font-size:16px}.section-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;margin:0 0 10px}.footer{margin-top:18px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.footer a{color:var(--cyan);text-decoration:none}.notice{color:var(--muted);font-size:12px;margin-top:10px}.tool-log{font-size:12px;color:var(--muted);max-height:120px;overflow:auto;white-space:pre-wrap}
+    @media(max-width:900px){.layout{grid-template-columns:1fr}.right{grid-template-columns:1fr 1fr}.right .chat-panel{grid-column:1/-1}}@media(max-width:620px){.shell{padding:16px 12px 28px}.top{align-items:flex-start}.status{font-size:11px}.stats{grid-template-columns:repeat(2,1fr)}.right{grid-template-columns:1fr}.right .chat-panel{grid-column:auto}.arena{aspect-ratio:1/1}.brand h1{font-size:18px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="top">
+      <div class="brand"><div class="mark">N</div><div><div class="eyebrow">Agent Five / Model 09</div><h1>Agent-Five-Nexus <span class="sub">v1.0.0</span></h1><div class="sub">Embodied learning · environment awareness · memory</div></div></div>
+      <div class="status"><span class="dot" id="statusDot"></span><span id="statusText">Initializing Nexus…</span></div>
+    </header>
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-head"><h2>LIVE ENVIRONMENT</h2><span class="sub">500 × 500 simulation</span></div>
+        <div class="arena-wrap"><canvas id="arena" class="arena" width="1000" height="800" aria-label="Live 2D simulation of the Nexus agent"></canvas></div>
+        <div class="panel-body">
+          <div class="stats">
+            <div class="stat"><label>Energy</label><strong id="energy">—</strong><div class="meter"><span id="energyBar"></span></div></div>
+            <div class="stat"><label>Goals collected</label><strong id="goals">0</strong></div>
+            <div class="stat"><label>Position X / Y</label><strong id="position">—</strong></div>
+            <div class="stat"><label>Learning examples</label><strong id="examples">0</strong></div>
+          </div>
+          <div class="controls">
+            <button class="primary" id="toggleRun">Pause simulation</button>
+            <button id="rewardBtn">Reward behavior +</button>
+            <button id="correctBtn">Correct behavior −</button>
+            <button id="evolutionBtn">Enable evolution</button>
+            <button id="resetBtn" class="danger">Reset agent</button>
+          </div>
+          <div class="notice">The simulation and learning run locally in your browser. Model state is stored in this browser's local storage.</div>
+        </div>
+      </section>
+      <aside class="right">
+        <section class="panel chat-panel">
+          <div class="panel-head"><h2>NEXUS CONVERSATION</h2><span class="sub" id="turnCount">Turn 0</span></div>
+          <div class="panel-body">
+            <div class="chat" id="chat" aria-live="polite"><div class="msg agent"><small>Nexus</small>Online. I can inspect my environment, navigate to a waypoint, estimate path risk, calculate, and recall learned experiences.</div></div>
+            <form class="composer" id="chatForm"><input id="chatInput" autocomplete="off" placeholder="Give Nexus an instruction…" aria-label="Message Nexus"><button class="primary" type="submit">Send</button></form>
+            <div class="quick"><button data-prompt="Scan the environment and report my energy">Scan environment</button><button data-prompt="Estimate path risk">Path risk</button><button data-prompt="Calculate 12 * (8 + 3)">Calculate</button><button data-prompt="Show my memory">Recall memory</button><button data-prompt="Collect 3 goals">Collect 3 goals</button></div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>LEARNING TELEMETRY</h2><span class="sub">Live</span></div>
+          <div class="panel-body">
+            <div class="metric-list">
+              <div class="metric"><span>Policy updates</span><b id="updates">0</b></div>
+              <div class="metric"><span>Rewards received</span><b id="rewards">0</b></div>
+              <div class="metric"><span>State memories</span><b id="memories">0</b></div>
+              <div class="metric"><span>Episode memories</span><b id="episodes">0</b></div>
+              <div class="metric"><span>Generation</span><b id="generation">—</b></div>
+              <div class="metric"><span>Population</span><b id="population">—</b></div>
+            </div>
+            <p class="section-label" style="margin-top:16px">Model data</p>
+            <div class="controls"><button id="exportBtn">Export model</button><button id="importBtn">Import model</button><input type="file" id="importFile" accept="application/json,.json" hidden></div>
+            <div class="notice" id="feedback">Nexus initialized.</div>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>RECENT TOOL ACTIVITY</h2></div>
+          <div class="panel-body"><div class="tool-log" id="toolLog">No tools called yet.</div></div>
+        </section>
+      </aside>
+    </div>
+    <footer class="footer"><span>Agent-Five-Nexus · Runs client-side · No account or API key required</span><span><a href="https://github.com/catxproductions/AFACGNNH/tree/agent-five-nexus-1.0.0" target="_blank" rel="noreferrer">Source code</a> · <a href="README-NEXUS.md">Documentation</a></span></footer>
+  </main>
+  <script src="agent-learning.js"></script>
+  <script src="nexus-language.js"></script>
+  <script src="agent-five-nexus.js"></script>
+  <script>
+  (() => {
+    "use strict";
+    const $ = id => document.getElementById(id);
+    const canvas = $("arena"), ctx = canvas.getContext("2d");
+    const trail = [];
+    let agent, running = true, lastSnapshot = null, turn = 0, goals = 0;
+    const setFeedback = message => $("feedback").textContent = message;
+    function addMessage(message) {
+      const node = document.createElement("div");
+      node.className = "msg " + (message.sender === "user" ? "user" : message.sender === "environment" ? "environment" : "agent");
+      const label = document.createElement("small");
+      label.textContent = message.sender === "user" ? "You" : message.sender === "environment" ? "Environment" : "Nexus";
+      const body = document.createElement("div");
+      body.textContent = message.text || "";
+      node.append(label, body); $("chat").appendChild(node);
+      $("chat").scrollTop = $("chat").scrollHeight;
+      if (message.sender === "user") { turn++; $("turnCount").textContent = "Turn " + turn; }
+      if (message.toolCalls && message.toolCalls.length) {
+        const entries = message.toolCalls.map(call => call.name + ": " + JSON.stringify(call.result));
+        $("toolLog").textContent = entries.concat($("toolLog").textContent.split("\n")).slice(0,8).join("\n");
+      }
+    }
+    function draw(s) {
+      const w = canvas.width, h = canvas.height, sx = w / s.dimensions.width, sy = h / s.dimensions.height;
+      ctx.clearRect(0,0,w,h);
+      ctx.fillStyle = "#0a1425"; ctx.fillRect(0,0,w,h);
+      ctx.strokeStyle = "rgba(110,145,190,.10)"; ctx.lineWidth = 1;
+      for(let x=0;x<=w;x+=40){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+      for(let y=0;y<=h;y+=40){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+      ctx.strokeStyle="#29415f";ctx.lineWidth=3;ctx.strokeRect(2,2,w-4,h-4);
+      const point = p => ({x:p.x*sx,y:p.y*sy});
+      const obstacle=point(s.obstacle), goal=point(s.goal), a=point(s.agent);
+      ctx.beginPath();ctx.arc(obstacle.x,obstacle.y,30*sx,0,Math.PI*2);ctx.fillStyle="rgba(255,133,133,.12)";ctx.fill();ctx.strokeStyle="#ff8585";ctx.lineWidth=3;ctx.stroke();
+      ctx.beginPath();ctx.arc(goal.x,goal.y,12*sx,0,Math.PI*2);ctx.fillStyle="rgba(142,227,173,.16)";ctx.fill();ctx.strokeStyle="#8ee3ad";ctx.lineWidth=3;ctx.stroke();
+      ctx.beginPath();ctx.arc(goal.x,goal.y,4*sx,0,Math.PI*2);ctx.fillStyle="#8ee3ad";ctx.fill();
+      trail.push(a);if(trail.length>65)trail.shift();
+      if(trail.length>1){ctx.beginPath();trail.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.strokeStyle="rgba(102,227,223,.28)";ctx.lineWidth=3;ctx.stroke();}
+      ctx.beginPath();ctx.arc(a.x,a.y,(s.agent.radius||10)*sx,0,Math.PI*2);ctx.fillStyle="#66e3df";ctx.shadowColor="#66e3df";ctx.shadowBlur=22;ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle="#e8ffff";ctx.lineWidth=2;ctx.stroke();
+      ctx.fillStyle="#edf3ff";ctx.font="bold 20px system-ui";ctx.fillText("NEXUS",a.x+17,a.y-15);
+      ctx.font="15px system-ui";ctx.fillStyle="#8ee3ad";ctx.fillText("GOAL",goal.x+17,goal.y-12);ctx.fillStyle="#ffaaaa";ctx.fillText("OBSTACLE",obstacle.x+38,obstacle.y+5);
+    }
+    function refresh() {
+      if(!agent)return;
+      const s=agent.getSnapshot();lastSnapshot=s;draw(s);
+      $("energy").textContent=s.energy.toFixed(1)+"%";$("energyBar").style.width=Math.max(0,Math.min(100,s.energy))+"%";
+      $("position").textContent=Math.round(s.agent.x)+" / "+Math.round(s.agent.y);
+      $("examples").textContent=s.counters.trainingExamples;
+      $("updates").textContent=s.counters.ppoUpdateCount;
+      $("rewards").textContent=s.counters.trainingRewards;
+      $("memories").textContent=s.memories.length;
+      $("episodes").textContent=s.episodes.length;
+      $("generation").textContent=s.evolutionaryMode?s.evolutionGeneration:"Off";
+      $("population").textContent=s.evolutionaryMode?s.evolutionPopulationSize:"—";
+      $("goals").textContent=goals + (s.evolutionaryMode && s.selectedEvolutionAgent ? " · Evo "+s.selectedEvolutionAgent.goalsCollected : "");
+    }
+    function loop(){refresh();requestAnimationFrame(loop);}
+    function send(text){
+      if(!text.trim())return;
+      try{agent.sendMessage(text);$("chatInput").value="";setFeedback("Instruction processed.");}
+      catch(error){setFeedback(error.message);}
+      refresh();
+    }
+    $("chatForm").addEventListener("submit",e=>{e.preventDefault();send($("chatInput").value);});
+    document.querySelectorAll("[data-prompt]").forEach(button=>button.addEventListener("click",()=>send(button.dataset.prompt)));
+    $("toggleRun").addEventListener("click",()=>{
+      running=!running;
+      if(running){agent.start();$("toggleRun").textContent="Pause simulation";$("statusText").textContent="Running";}
+      else{agent.stop();$("toggleRun").textContent="Resume simulation";$("statusText").textContent="Paused";}
+    });
+    $("rewardBtn").addEventListener("click",()=>{agent.reward();setFeedback("Positive feedback recorded for the latest behavior.");refresh();});
+    $("correctBtn").addEventListener("click",()=>{agent.correct();setFeedback("Correction applied to the latest behavior.");refresh();});
+    $("evolutionBtn").addEventListener("click",()=>{
+      const enabled=!lastSnapshot.evolutionaryMode;agent.setEvolutionMode(enabled);
+      $("evolutionBtn").textContent=enabled?"Disable evolution":"Enable evolution";setFeedback(enabled?"Evolution mode enabled.":"Evolution mode disabled.");refresh();
+    });
+    $("resetBtn").addEventListener("click",()=>{
+      if(!confirm("Reset Nexus brain and learning memory in this browser?"))return;
+      agent.reset();trail.length=0;goals=0;setFeedback("Nexus reset.");refresh();
+    });
+    $("exportBtn").addEventListener("click",()=>{
+      const blob=new Blob([JSON.stringify(agent.exportData(),null,2)],{type:"application/json"});
+      const url=URL.createObjectURL(blob),link=document.createElement("a");
+      link.href=url;link.download="agent-five-nexus-export.json";link.click();URL.revokeObjectURL(url);
+      setFeedback("Model export downloaded.");
+    });
+    $("importBtn").addEventListener("click",()=>$("importFile").click());
+    $("importFile").addEventListener("change",async e=>{
+      const file=e.target.files[0];if(!file)return;
+      try{agent.importData(JSON.parse(await file.text()),file.name);setFeedback("Imported "+file.name);refresh();}
+      catch(error){setFeedback("Import failed: "+error.message);}finally{e.target.value="";}
+    });
+    try {
+      agent=AgentFiveNexusCore.create({
+        world:{width:500,height:400},
+        storage:window.localStorage,
+        requestFrame:callback=>requestAnimationFrame(callback),
+        cancelFrame:handle=>cancelAnimationFrame(handle),
+        ui:{
+          onChatMessage:addMessage,
+          setModelStatus:status=>{$("statusText").textContent=status==="Ready"?"Running":status;}
+        }
+      });
+      agent.start();
+      $("statusText").textContent="Running";
+      $("statusDot").style.background="var(--green)";
+      refresh();requestAnimationFrame(loop);
+    } catch(error) {
+      $("statusText").textContent="Initialization error";
+      $("statusDot").style.background="var(--red)";
+      setFeedback("Could not start Nexus: "+error.message);
+      console.error(error);
+    }
+  })();
+  </script>
+</body>
+</html>
