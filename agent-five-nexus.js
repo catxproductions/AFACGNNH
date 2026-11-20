@@ -2960,6 +2960,6 @@
     }
 
 
-    root.AgentFiveNexusCore = Object.freeze({ create: createAgentFiveNexus, modelName: MODEL_NAME, modelId: MODEL_ID, version: NETWORK_VERSION });
+    root.AgentFiveNexusCore = Object.freeze({ create: createAgentFiveNexus, modelName: "Agent-Five-Nexus-1.0.0", modelId: "Agent-Five-Nexus-1.0.0", version: 9 });
     root.AgentFiveCore = root.AgentFiveNexusCore;
 })(globalThis);
