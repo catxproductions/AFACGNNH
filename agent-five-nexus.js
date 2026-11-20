@@ -332,7 +332,7 @@
             modelName: MODEL_NAME,
             version: NETWORK_VERSION,
             modelType: shape.outputSize === 1 ? "critic" : "policy",
-            architecture: [INPUTS, ...HIDDEN_LAYERS, shape.outputSize]
+            architecture: [INPUTS, ...HIDDEN_LAYERS, shape.outputSize === 1 ? 1 : OUTPUTS]
         };
     }
 
@@ -407,7 +407,7 @@
         // v7 stored obstacle-closing speed at index 14 and goal distance at
         // index 15. v8 replaces those slots with goal distance and energy use.
         const inputs = values.slice();
-        if (remapV7Ordering && inputs.length === INPUTS) {
+        if (remapV7Ordering && inputs.length === 16) {
             inputs[14] = values[15];
             inputs[15] = 0;
         }
