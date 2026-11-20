@@ -121,20 +121,23 @@
             const ctx = Array.from({ length: c }, (_, i) => Number(context && context[i]) || 0);
             const z = new Float32Array(h), r = new Float32Array(h), candidate = new Float32Array(h);
             for (let j = 0; j < h; j++) {
-                let az = this.bz[j], ar = this.br[j], ah = this.bh[j];
+                let az = this.bz[j], ar = this.br[j];
                 for (let i = 0; i < e; i++) {
                     az += this.Wz[j * e + i] * x[i];
                     ar += this.Wr[j * e + i] * x[i];
-                    ah += this.Wh[j * e + i] * x[i];
                 }
                 for (let i = 0; i < h; i++) {
                     az += this.Uz[j * h + i] * state[i];
                     ar += this.Ur[j * h + i] * state[i];
-                    ah += this.Uh[j * h + i] * state[i] * sigmoid(ar);
                 }
-                for (let i = 0; i < c; i++) ah += this.Wc[j * c + i] * ctx[i];
                 z[j] = sigmoid(az);
                 r[j] = sigmoid(ar);
+            }
+            for (let j = 0; j < h; j++) {
+                let ah = this.bh[j];
+                for (let i = 0; i < e; i++) ah += this.Wh[j * e + i] * x[i];
+                for (let i = 0; i < h; i++) ah += this.Uh[j * h + i] * (r[i] * state[i]);
+                for (let i = 0; i < c; i++) ah += this.Wc[j * c + i] * ctx[i];
                 candidate[j] = Math.tanh(ah);
             }
             const next = new Float32Array(h);
