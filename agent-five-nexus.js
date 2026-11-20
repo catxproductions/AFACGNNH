@@ -38,9 +38,11 @@
     const LEGACY_STORAGE_KEY_V5 = "agent5-brain-v5";
     const MEMORY_STORAGE_KEY = "agent5-nexus-1.0.0-memory";
     const LEGACY_MEMORY_STORAGE_KEY_V1 = "agent5-memory-v1";
+    const LEGACY_MEMORY_STORAGE_KEY_V2 = "agent5-memory-v2";
     const EPISODE_STORAGE_KEY = "agent5-nexus-1.0.0-episodes";
     const TOKENIZER_STORAGE_KEY = "agent5-nexus-1.0.0-tokenizer";
     const LEGACY_EPISODE_STORAGE_KEY_V1 = "agent5-episodes-v1";
+    const LEGACY_EPISODE_STORAGE_KEY_V2 = "agent5-episodes-v2";
     const MEMORY_CAPACITY = 192;
     const EPISODE_MEMORY_CAPACITY = 48;
     const EPISODE_SEQUENCE_LENGTH = 12;
@@ -93,6 +95,19 @@
     const MAX_SIMULATION_STEPS_PER_FRAME = 8;
     const EVOLUTION_TRANSITION_MS = 1200;
     const EVOLUTION_GENERATION_TIMEOUT_MS = 120000;
+
+    const languageModule = options.language || root.AgentFiveNexusLanguage;
+    let decoder = null;
+    if (languageModule && typeof languageModule.NexusDecoderNetwork === "function") {
+        try {
+            const savedBrain = JSON.parse(storage.getItem(STORAGE_KEY) || "null");
+            const savedTokenizer = JSON.parse(storage.getItem(TOKENIZER_STORAGE_KEY) || "null");
+            decoder = new languageModule.NexusDecoderNetwork({
+                tokenizerData: savedTokenizer || (savedBrain && savedBrain.decoder && savedBrain.decoder.tokenizer),
+                saved: savedBrain && savedBrain.decoder
+            });
+        } catch (error) { decoder = new languageModule.NexusDecoderNetwork(); }
+    }
 
 
     class NeuralNetwork {
@@ -487,7 +502,7 @@
             if (currentRaw) return normalizeMemoryCollection(JSON.parse(currentRaw));
 
 
-            const legacyRaw = storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V1);
+            const legacyRaw = storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V2) || storage.getItem(LEGACY_MEMORY_STORAGE_KEY_V1);
             if (!legacyRaw) return [];
             const migrated = normalizeMemoryCollection(JSON.parse(legacyRaw), true);
             storage.setItem(MEMORY_STORAGE_KEY, JSON.stringify(migrated));
@@ -536,7 +551,7 @@
             }
 
 
-            const legacyRaw = storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V1);
+            const legacyRaw = storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V2) || storage.getItem(LEGACY_EPISODE_STORAGE_KEY_V1);
             if (!legacyRaw) return [];
             const legacy = JSON.parse(legacyRaw);
             const migrated = Array.isArray(legacy) ?
@@ -652,6 +667,7 @@
         return {
             modelName: MODEL_NAME,
             version: NETWORK_VERSION,
+            language: decoder ? { trainedTokens: decoder.trainedTokens, vocabularySize: decoder.tokenizer.vocabulary.length } : null,
             dimensions: world,
             config: {
                 maxEnergy: MAX_ENERGY, goalRadius: GOAL_RADIUS,
@@ -1238,10 +1254,12 @@
 
     function saveBrain() {
         try {
-            storage.setItem(STORAGE_KEY, JSON.stringify({
-                ...brain.export(),
-                critic: critic.export()
-            }));
+            const payload = {
+                ...brain.export(), modelName: MODEL_NAME, version: NETWORK_VERSION,
+                critic: critic.export(), ...(decoder ? { decoder: decoder.export() } : {})
+            };
+            storage.setItem(STORAGE_KEY, JSON.stringify(payload));
+            if (decoder) storage.setItem(TOKENIZER_STORAGE_KEY, JSON.stringify(decoder.tokenizer.export()));
             if (typeof ui.setModelStatus === "function") ui.setModelStatus("Actor + critic saved");
         } catch (error) {
             console.warn("Could not save Agent Five's actor-critic model.", error);
@@ -2463,7 +2481,8 @@
             version: NETWORK_VERSION,
             ...exportSource.export(),
             critic: exportCritic.export(),
-            memoryVersion: 3,
+            ...(decoder ? { decoder: decoder.export(), tokenizer: decoder.tokenizer.export() } : {}),
+            memoryVersion: 4,
             memory: cloneMemories(exportMemories),
             episodes: cloneEpisodes(exportEpisodes)
         };
@@ -2523,6 +2542,11 @@
         lastTransition = null;
         brain = new NeuralNetwork(importedModel);
         critic = importedCritic;
+        if (decoder && data.decoder && !decoder.import(data.decoder)) throw new Error("The included Nexus language decoder is invalid.");
+        if (decoder && !data.decoder && data.tokenizer) {
+            decoder.tokenizer = new languageModule.NexusTokenizer(data.tokenizer);
+            decoder.ensureVocabulary();
+        }
         if (includedMemory) {
             memories = importedMemories;
             lastMemoryRecall = 0;
@@ -2647,7 +2671,28 @@
         return { count: matches.length, matches };
     }
 
+    function decoderContext() {
+        const policy = brain.forward(lastInputs || Array(INPUTS).fill(0));
+        const hidden = policy.activations[policy.activations.length - 2] || [];
+        const telemetry = inspect_environment();
+        return [hidden[0] || 0, hidden[1] || 0, hidden[2] || 0, hidden[3] || 0,
+            clamp(telemetry.position.x / world.width, 0, 1),
+            clamp(telemetry.position.y / world.height, 0, 1),
+            clamp(telemetry.energy / MAX_ENERGY, 0, 1),
+            clamp(distance(goal.x - agent.x, goal.y - agent.y) / Math.hypot(world.width, world.height), 0, 1)];
+    }
+
+    function generateText(prompt, maximumTokens = 32) {
+        if (!decoder) return "";
+        const ids = decoder.generate("<BOS> " + String(prompt || ""), decoderContext(), maximumTokens);
+        return decoder.tokenizer.decode(ids);
+    }
+
     function emitChat(sender, textValue, extra = {}) {
+        if (decoder) {
+            const marker = sender === "user" ? "<USER>" : sender === "agent" ? "<AGENT>" : "<ENV>";
+            decoder.trainSequence(marker + " " + String(textValue), decoderContext());
+        }
         const message = {
             model: MODEL_NAME, sender, text: String(textValue),
             tokens: String(textValue).split(/\s+/).filter(Boolean),
@@ -2793,7 +2838,7 @@
         reward: () => { reinforce(true); addTransitionReward(singlePPOState, 1.5); },
         correct: () => { applyManualCorrection(); addTransitionReward(singlePPOState, -1.0); },
         clearMemory, reset: resetBrainAndMemory, exportData: exportModelData, importData: importModelData,
-        inspect_environment, set_waypoint, estimate_path_risk, calculate: safeCalculate, query_memory
+        inspect_environment, set_waypoint, estimate_path_risk, calculate: safeCalculate, query_memory, generateText
     };
 
 
