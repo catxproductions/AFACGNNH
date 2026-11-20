@@ -5,7 +5,7 @@
     // Agent Five's runtime is independent of any particular UI. Host
     // applications inject world dimensions, persistence, scheduling,
     // learning services, workers, and optional rendering callbacks.
-    function createAgentFive(options = {}) {
+    function createAgentFiveNexus(options = {}) {
         const configuredWorld = options.world || options;
         const world = Object.freeze({
             width: Math.max(1, Number(configuredWorld.width) || 500),
@@ -31,6 +31,7 @@
 
 
     const MODEL_NAME = "Agent-Five-Nexus-1.0.0";
+    const MODEL_ID = "Agent-Five-Nexus-1.0.0";
     const STORAGE_KEY = "agent5-nexus-1.0.0-brain";
     const LEGACY_STORAGE_KEY_V8 = "agent5-brain-v8";
     const LEGACY_STORAGE_KEY_V7 = "agent5-brain-v7";
@@ -907,10 +908,12 @@
         activeDirective: false, intentX: 0, intentY: 0, momentum: 0,
         pendingTool: false, hazardUrgency: 0, missionProgress: 0,
         conversationalEnergy: 1, wait: false, missionWaypoint: null,
-        turn: 0, lastUserText: "", lastAssistantText: ""
+        turn: 0, lastUserText: "", lastAssistantText: "",
+        missionGoalTarget: 1, missionGoalsCompleted: 0
     };
     const environmentEventTimes = new Map();
     let lastAutonomousSpeechAt = 0;
+    let lastAutonomousToolAt = 0;
     let lastFrameTimestamp = null;
     let running = false;
     let frameHandle = null;
@@ -2253,6 +2256,17 @@
             lastAutonomousSpeechAt = now;
             emitChat("agent", "Status: I am navigating with " + energy.toFixed(1) + " energy remaining.");
         }
+        if (lastOutput[4] > 0.96 && now - lastAutonomousToolAt > 12000) {
+            lastAutonomousToolAt = now;
+            dialogue.pendingTool = true;
+            const telemetryResult = inspect_environment();
+            emitChat("agent", "Autonomous environment inspection completed.", {
+                toolCalls: [{ name: "inspect_environment", arguments: [], result: telemetryResult }],
+                telemetry: telemetryResult
+            });
+            dialogue.pendingTool = false;
+            addTransitionReward(singlePPOState, 0.05);
+        }
         lastMemoryRecall = decision.memoryRecall.strength;
         lastMemoryRecallCount = decision.memoryRecall.count;
         lastPlannedMean = decision.mean || lastPlannedMean;
@@ -2328,7 +2342,14 @@
             singlePPOState.trajectory = [];
             saveEpisodes();
             emitEnvironmentEvent("<ENV_GOAL>", "Goal collected. Energy restored and the next target has been assigned.");
-            dialogue.missionProgress = clamp(dialogue.missionProgress + 0.2, 0, 1);
+            dialogue.missionGoalsCompleted++;
+            dialogue.missionProgress = clamp(
+                dialogue.missionGoalsCompleted / Math.max(1, dialogue.missionGoalTarget), 0, 1
+            );
+            if (dialogue.missionGoalsCompleted >= dialogue.missionGoalTarget) {
+                dialogue.activeDirective = false;
+                dialogue.missionWaypoint = null;
+            }
             if (dialogue.missionWaypoint &&
                 distance(dialogue.missionWaypoint.x - agent.x, dialogue.missionWaypoint.y - agent.y) < agent.radius + GOAL_RADIUS) {
                 dialogue.missionWaypoint = null;
@@ -2763,6 +2784,12 @@
         dialogue.intentY = /careful|carefully|conserve|slow|wait/.test(lower) ? -1 :
             /fast|quick|speed/.test(lower) ? 1 : 0;
         dialogue.wait = /\b(wait|stop|hold position)\b/.test(lower);
+        const collectMatch = lower.match(/collect\s+(\d+)\s+goals?/);
+        if (collectMatch) {
+            dialogue.missionGoalTarget = clamp(Math.floor(Number(collectMatch[1])), 1, 100);
+            dialogue.missionGoalsCompleted = 0;
+            dialogue.missionProgress = 0;
+        }
         const waypointMatch = lower.match(/(?:waypoint|go to)\s+(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
         if (waypointMatch) {
             toolResult = set_waypoint(Number(waypointMatch[1]), Number(waypointMatch[2]));
@@ -2809,9 +2836,9 @@
                 ", " + agent.y.toFixed(1) + ") and my energy level is " + energy.toFixed(1) +
                 ". You can ask me to inspect the environment, estimate path risk, set a waypoint, calculate an expression, or search memory.";
         }
-        dialogue.pendingTool = false;
         dialogue.momentum = 0.8;
         const message = emitChat("agent", response, { toolCalls, telemetry: inspect_environment() });
+        dialogue.pendingTool = false;
         if (toolCalls.length) addTransitionReward(singlePPOState, 0.15);
         saveBrain();
         return { ...message, toolCalls, telemetry: inspect_environment() };
@@ -2876,7 +2903,12 @@
     const api = {
         modelName: MODEL_NAME, version: NETWORK_VERSION,
         start, stop, sendMessage, getSnapshot: createSnapshot, setPopulationSize, setEvolutionMode, setAgentRadius,
-        reward: () => { reinforce(true); addTransitionReward(singlePPOState, 1.5); },
+        reward: () => {
+            reinforce(true);
+            if (lastInputs && lastOutput) storeExperience(memories, lastInputs, lastOutput, "chat-helpful");
+            addTransitionReward(singlePPOState, 1.5);
+            saveMemory(); saveBrain();
+        },
         correct: () => { applyManualCorrection(); addTransitionReward(singlePPOState, -1.0); },
         clearMemory, reset: resetBrainAndMemory, exportData: exportModelData, importData: importModelData,
         inspect_environment, set_waypoint, estimate_path_risk, calculate: safeCalculate, query_memory, generateText
@@ -2891,6 +2923,6 @@
     }
 
 
-    root.AgentFiveNexusCore = Object.freeze({ create: createAgentFive, modelName: MODEL_NAME, version: NETWORK_VERSION });
+    root.AgentFiveNexusCore = Object.freeze({ create: createAgentFiveNexus, modelName: MODEL_NAME, modelId: MODEL_ID, version: NETWORK_VERSION });
     root.AgentFiveCore = root.AgentFiveNexusCore;
 })(globalThis);
