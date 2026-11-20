@@ -1,0 +1,76 @@
+Build a complete, zero-API-key Embodied Generative Agentic Chatbot named Agent-Five-Nexus-1.0.0 (NETWORK_VERSION = 9, MODEL_ID = "Agent-Five-Nexus-1.0.0"), written in pure, modular JavaScript (ES6+ with zero external libraries or pre-trained APIs). Extend the provided AgentFiveCore architecture so the agent simultaneously navigates and interacts with its 2D physical simulation environment and converses, reasons, and executes tools through a unified hybrid neural network system.
+
+1. Model Versioning & Storage Schema (Agent-Five-Nexus-1.0.0)
+
+Upgrade the persistence, serialization, and legacy migration layers to formally establish Agent-Five-Nexus-1.0.0 as a new major model generation while preserving backward compatibility with AgentFiveCore v5–v8 saved brains:
+• Version Identifiers:
+	• Set MODEL_NAME = "Agent-Five-Nexus-1.0.0" and NETWORK_VERSION = 9.
+	• Update active storage keys to "agent5-nexus-1.0.0-brain", "agent5-nexus-1.0.0-memory", "agent5-nexus-1.0.0-episodes", and "agent5-nexus-1.0.0-tokenizer", while retaining "agent5-brain-v8", "agent5-brain-v7", "agent5-brain-v6", and "agent5-brain-v5" as fallback migration sources.
+• v8 → Nexus 1.0.0 Migration (migrateLegacyBrain):
+	• Automatically detect saved v8 models (INPUTS = 16, OUTPUTS = 3), expand the input layer from 16 to 24 (neutral-initializing the 8 new conversational/agentic sensor weights to 0), retain the HIDDEN_LAYERS deep bottleneck weights, and expand the output layer from 3 to 5 (preserving spatial vx, vy, brake outputs while initializing the new speakTrigger and toolTrigger heads).
+	• Expose modelName: "Agent-Five-Nexus-1.0.0" and version: 9 in NeuralNetwork.prototype.export(), exportModelData(), and createSnapshot().
+
+2. Unified Embodied + Conversational Architecture
+
+Keep the entire 2D physics, energy, obstacle, goal, and 60 Hz simulation engine (simulateStep) of AgentFiveCore intact, and fuse it with an Agentic Language & Tool Pipeline:
+• Dual-Modality State Space: The agent physically moves inside world (width × height), avoids obstacle, collects goal targets, manages MAX_ENERGY = 100, and simultaneously maintains an active Dialogue Context & Task State (user messages, active commands, tool outputs, and environmental telemetry).
+• Bidirectional Embodiment:
+	• Language → Action: User chat messages (e.g., "go to the goal carefully", "conserve energy and wait", "scan obstacle distance", "collect 3 goals") dynamically modulate the agent's active mission directives, target waypoints, or behavioral constraints in the 2D arena.
+	• Environment → Language: Real-time physical events (wall-contact, obstacle collision, goal-reward, energy-depletion, lookahead hazard detection) generate structured Environmental Event Tokens (<ENV_GOAL>, <ENV_WALL>, <ENV_OBSTACLE>, <ENV_LOW_ENERGY>) that trigger autonomous status updates, explanations, or requests for user guidance in the chat stream.
+
+3. Expanded Multimodal Observation Vector (INPUTS = 24)
+
+Extend createObservation() from 16 to 24 normalized floating-point inputs (including automatic zero-padding for migrated v8 memories in normalizeObservationInputs()):
+• Slots [0..15] (Preserved Spatial & Energy Sensors): currentSpeedX, currentSpeedY, goalDx, goalDy, obstacleDx, obstacleDy, clearance, currentLocationX, currentLocationY, energyLeft, leftClearance, rightClearance, topClearance, bottomClearance, goalDistance, and normalizedEnergyUsageRate.
+• Slots [16..23] (Conversational & Agentic Context Sensors):
+	• [16]: Active user directive flag (1 when a user command is active, 0 otherwise).
+	• [17]: Semantic intent projection X (navigation vs. telemetry query vs. tool task).
+	• [18]: Semantic intent projection Y (caution/energy-saving vs. high-speed bias).
+	• [19]: Dialogue turn momentum / conversational recency decay.
+	• [20]: Pending tool execution state (1 when tool output awaits synthesis).
+	• [21]: Environmental hazard urgency score (derived from AVOIDANCE_RANGE and velocity).
+	• [22]: Mission progress ratio toward user-requested objective.
+	• [23]: Conversational energy budget ratio (throttling verbose generation when physical energy is low).
+
+4. Hybrid Neural Network & Generative Engine (From Scratch)
+
+Retain the exact NeuralNetwork class (Xavier/Glorot uniform initialization, Math.tanh activations, HIDDEN_LAYERS deep bottleneck, cloneNetwork weight mutation, and JSON validation) and pair it with a pure-JS Generative Language & Tool Head:
+• Multimodal Policy Actor (OUTPUTS = 5):
+	• output[0..1]: Continuous 2D spatial thrust vector (vx, vy acceleration) driving physical movement.
+	• output[2]: Physical braking / damping control (brake).
+	• output[3]: Communication Gate (speakTrigger) — controls when Agent-Five-Nexus-1.0.0 autonomously speaks to the user (narrating plans, reporting collisions, or answering prompts).
+	• output[4]: Agentic Tool Routing Gate (toolTrigger) — controls when the agent invokes an internal or environment tool prior to generating text.
+• Value Critic (outputSize = 1): Evaluates combined spatial + conversational expected return for Proximal Policy Optimization (PPO).
+• From-Scratch Causal Sequence Decoder (NexusDecoderNetwork):
+	• Implement a pure-JavaScript neural text generator (custom GRU / minimal causal self-attention layer built with Float32Array—zero external ML frameworks) and a custom serializable tokenizer (<PAD>, <UNK>, <BOS>, <EOS>, <USER>, <AGENT>, <ENV>, <TOOL>, <RES>).
+	• Condition next-token logits on both token embeddings and the Actor Network's penultimate hidden activations (activations[activations.length - 2]) plus live telemetry (agent.x, agent.y, energy, goalDistance), grounding every response in what the agent is physically doing and perceiving.
+
+5. Agentic Tool & World-Interaction Loop
+
+Implement a deterministic Tool Execution Layer accessible during both autonomous 60 Hz simulation ticks and interactive user chat turns:
+• Spatial & Telemetry Tools: inspect_environment() (returns coordinates, clearances, velocity, and energy usage), set_waypoint(x, y) (biases or overrides navigation target), and estimate_path_risk() (runs learning.planAction horizon rollout and returns collision risk).
+• Memory & Utility Tools: calculate(expr) (safe arithmetic evaluator) and query_memory(outcomeType) (searches state and episodic memories for past successes/failures).
+• When output[4] crosses the tool threshold or a user query demands factual telemetry, execute the tool, inject <TOOL> name <RES> data into the context window, and synthesize a grounded natural-language reply while continuing to navigate safely.
+
+6. Dual-Tier Multimodal Memory & Joint PPO / Evolutionary Training
+
+Extend the memory and training pipelines to jointly optimize physical survival and conversational helpfulness:
+• Multimodal State & Episodic Memory (MEMORY_CAPACITY = 192, EPISODE_MEMORY_CAPACITY = 48): Store 24-input state vectors alongside 5-output action targets and outcomes ("goal-reward", "behavior-correction", "energy-depletion", "wall-contact", "chat-helpful"), updating MEMORY_FEATURE_WEIGHTS to length 24.
+• Unified PPO Rollouts (learning.trainPPO & Web Worker):
+	• Combine physical rewards (goal collection +3.5, progress shaping, energy efficiency, obstacle/wall penalties) with conversational rewards (api.reward() +1.5, api.correct() -1.0, valid tool execution bonus).
+	• Offload PPO updates to learning-worker.js?v=nexus-1.0.0 with a safe main-thread fallback (drainFallbackPPOQueue).
+• Embodied Evolutionary Arena (evolutionaryMode):
+	• Spawn 15 to 300 independent Agent-Five-Nexus-1.0.0 clones (createEvolutionGeneration), each navigating its own 2D world and responding to simulated user directives.
+	• Rank and select evolutionSuccessor by combined physical goals collected, survival energy, and task completion, mutating weights (cloneNetwork) and adapting evolutionMutationRate via measurePopulationDiversity.
+
+7. Host-Agnostic Runtime & Extended Public API
+
+Encapsulate the entire runtime inside a dependency-injected factory (createAgentFiveNexus(options = {}), exported on root.AgentFiveNexusCore with an alias on root.AgentFiveCore for drop-in compatibility) with zero DOM coupling:
+• UI Callbacks (options.ui): Keep drawWorld, drawEvolution, updateDiagnostics, updateNeuralNetwork, updateMemoryOverview, and updateEvolutionStatus, and add onChatMessage({ model: "Agent-Five-Nexus-1.0.0", sender, text, tokens, toolCalls, telemetry }) and onTokenStream(token).
+• Frozen Public API: Expose modelName: "Agent-Five-Nexus-1.0.0", version: 9, start(), stop(), sendMessage(userText), getSnapshot(), setPopulationSize(), setEvolutionMode(), setAgentRadius(), reward(), correct(), clearMemory(), reset(), exportData(), and importData().
+
+Deliverable Requirements
+
+1. Provide the complete, self-contained, dependency-free JavaScript implementation for Agent-Five-Nexus-1.0.0 (AgentFiveNexusCore) including automatic v5–v8 → v9 (Agent-Five-Nexus-1.0.0) migration, plus the companion AgentLearning module (planAction, sampleAction, trainPPO).
+2. Ensure all actor/critic weights, generative decoder weights, tokenizer vocabulary, state memories, and episodic trajectories serialize cleanly via exportData() / importData() and persist via storage.
+3. Include a concise headless demonstration showing Agent-Five-Nexus-1.0.0 migrating/initializing, running its 60 Hz physical simulation, receiving a user chat message, invoking an environment inspection tool, streaming a grounded response, and applying reinforcement feedback.
