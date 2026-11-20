@@ -1540,6 +1540,8 @@
         return evolutionPopulation.reduce((best, candidate) => {
             if (!best || candidate.goalsCollected > best.goalsCollected) return candidate;
             if (candidate.goalsCollected < best.goalsCollected) return best;
+            if ((candidate.taskCompletionScore || 0) > (best.taskCompletionScore || 0)) return candidate;
+            if ((candidate.taskCompletionScore || 0) < (best.taskCompletionScore || 0)) return best;
             if (candidate.progressScore > best.progressScore) return candidate;
             if (candidate.progressScore < best.progressScore) return best;
             if (candidate.energy > best.energy) return candidate;
@@ -1841,6 +1843,12 @@
                 addTransitionReward(candidate, 3.5);
                 candidate.energy = MAX_ENERGY;
                 candidate.goalsCollected++;
+                candidate.dialogue.missionGoalsCompleted++;
+                candidate.dialogue.missionProgress = clamp(
+                    candidate.dialogue.missionGoalsCompleted / candidate.dialogue.missionGoalTarget, 0, 1
+                );
+                candidate.taskCompletionScore = candidate.dialogue.missionProgress;
+                if (candidate.dialogue.missionProgress >= 1) candidate.dialogue.activeDirective = false;
                 candidate.stillSince = null;
                 reachedGoal = true;
 
